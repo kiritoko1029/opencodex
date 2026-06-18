@@ -11,9 +11,10 @@ import { parseRequest } from "./responses/parser";
 import { routeModel } from "./router";
 import { namespacedToolName } from "./types";
 import {
-  buildModelsRequest, clearLoginState, getLoginStatus, getValidAccessToken, isOAuthProvider,
-  listOAuthProviders, reconcileOAuthProviders, resolveModelsAuthToken, startLoginFlow, upsertOAuthProvider,
+  clearLoginState, getLoginStatus, getValidAccessToken, isOAuthProvider,
+  listOAuthProviders, reconcileOAuthProviders, startLoginFlow, upsertOAuthProvider,
 } from "./oauth/index";
+import type { CatalogModel } from "./codex-catalog";
 import { removeCredential } from "./oauth/store";
 import { listKeyLoginProviders } from "./oauth/key-providers";
 import type { OcxConfig, OcxProviderConfig } from "./types";
@@ -398,34 +399,15 @@ async function handleManagementAPI(req: Request, url: URL, config: OcxConfig): P
   return null;
 }
 
-async function fetchAllModels(config: OcxConfig) {
-  const results: { id: string; provider: string; owned_by?: string }[] = [];
-  const fetches = Object.entries(config.providers).map(async ([name, prov]) => {
-    if (prov.authMode === "forward") return; // ChatGPT backend has no /models; gpt listed statically
-    const apiKey = await resolveModelsAuthToken(name, prov);
-    if (prov.authMode === "oauth" && !apiKey) return; // not logged in → skip silently
-    const { url, headers } = buildModelsRequest(prov, apiKey);
-    const liveIds = new Set<string>();
-    try {
-      const res = await fetch(url, { headers, signal: AbortSignal.timeout(5000) });
-      if (res.ok) {
-        const json = await res.json() as { data?: { id: string; owned_by?: string }[] };
-        if (json.data && Array.isArray(json.data)) {
-          for (const m of json.data) {
-            results.push({ id: m.id, provider: name, owned_by: m.owned_by });
-            liveIds.add(m.id);
-          }
-        }
-      }
-    } catch { /* provider unreachable */ }
-    // Merge explicit config additions (e.g. a new endpoint not in /models) not already listed.
-    for (const id of prov.models ?? []) {
-      if (!liveIds.has(id)) results.push({ id, provider: name });
-    }
-  });
-  await Promise.all(fetches);
-  results.sort((a, b) => a.id.localeCompare(b.id));
-  return results;
+/**
+ * Live routed-provider models for the proxy's /api/* and /v1/models endpoints. Delegates to the
+ * canonical, TTL-cached `gatherRoutedModels` (single source of truth) — so the GUI/codex endpoints
+ * share the same fetch, the same per-provider cache (dedups Codex's frequent /v1/models polling),
+ * and the same stale fallback when a provider blips, instead of a parallel uncached copy.
+ */
+async function fetchAllModels(config: OcxConfig): Promise<CatalogModel[]> {
+  const { gatherRoutedModels } = await import("./codex-catalog");
+  return gatherRoutedModels(config);
 }
 
 export function startServer(port?: number) {

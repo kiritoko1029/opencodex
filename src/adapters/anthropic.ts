@@ -11,8 +11,16 @@ import type {
 } from "../types";
 import { ANTHROPIC_OAUTH_BETA, CLAUDE_CODE_SYSTEM_INSTRUCTION, applyClaudeToolPrefix, stripClaudeToolPrefix } from "../oauth/anthropic";
 
+/** Default `max_tokens` when Codex omits `max_output_tokens`. */
+const DEFAULT_MAX_TOKENS = 8192;
 /** Safe ceiling for `max_tokens` (thinking + visible output) across current Claude 4.x models. */
 const REASONING_MAX_TOKENS_CEILING = 32_000;
+/** Anthropic's documented minimum `thinking.budget_tokens`. */
+const MIN_THINKING_BUDGET = 1024;
+/** Visible-output room added above the thinking budget when sizing `max_tokens`. */
+const OUTPUT_HEADROOM = 8192;
+/** Minimum visible-output room kept below `max_tokens` (so `max_tokens > budget_tokens` always holds). */
+const OUTPUT_FLOOR = 4096;
 
 /** Map a Responses reasoning effort to an Anthropic extended-thinking budget (tokens, >= 1024). */
 function reasoningBudget(effort: string): number {
@@ -97,7 +105,7 @@ export function createAnthropicAdapter(provider: OcxProviderConfig): ProviderAda
         model: parsed.modelId,
         messages,
         stream: parsed.stream,
-        max_tokens: parsed.options.maxOutputTokens ?? 8192,
+        max_tokens: parsed.options.maxOutputTokens ?? DEFAULT_MAX_TOKENS,
       };
       if (isOAuth) {
         // Claude OAuth (Pro/Max) requires the first system block to be the Claude Code identity.
@@ -118,10 +126,10 @@ export function createAnthropicAdapter(provider: OcxProviderConfig): ProviderAda
         // visible output) and budget_tokens >= 1024. Codex sends the SAME value for both, which
         // 400s ("max_tokens must be greater than thinking.budget_tokens"). Size them so max_tokens
         // always exceeds the budget within a model-safe ceiling, reserving room for visible output.
-        const maxOut = parsed.options.maxOutputTokens ?? 8192;
+        const maxOut = parsed.options.maxOutputTokens ?? DEFAULT_MAX_TOKENS;
         const wantBudget = reasoningBudget(parsed.options.reasoning);
-        const maxTokens = Math.min(REASONING_MAX_TOKENS_CEILING, Math.max(maxOut, wantBudget + 8192));
-        const budget = Math.max(1024, Math.min(wantBudget, maxTokens - 4096));
+        const maxTokens = Math.min(REASONING_MAX_TOKENS_CEILING, Math.max(maxOut, wantBudget + OUTPUT_HEADROOM));
+        const budget = Math.max(MIN_THINKING_BUDGET, Math.min(wantBudget, maxTokens - OUTPUT_FLOOR));
         body.max_tokens = maxTokens;
         body.thinking = { type: "enabled", budget_tokens: budget };
         // Extended thinking disallows temperature != 1 and top_p — drop both or the API 400s.
