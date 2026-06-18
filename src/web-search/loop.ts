@@ -24,12 +24,20 @@ interface WebSearchCall {
  * (Codex never sees the synthetic tool); every other event — text, thinking, real tool calls, done —
  * is preserved in order.
  */
-export function scanEventsForWebSearch(events: AdapterEvent[]): { calls: WebSearchCall[]; passthrough: AdapterEvent[] } {
+export function scanEventsForWebSearch(events: AdapterEvent[]): {
+  calls: WebSearchCall[];
+  passthrough: AdapterEvent[];
+  hasRealToolCall: boolean;
+} {
   const calls: WebSearchCall[] = [];
   const passthrough: AdapterEvent[] = [];
+  let hasRealToolCall = false;
   let pending: { name: string; id: string; argsBuf: string; events: AdapterEvent[] } | null = null;
   const flushPending = (): void => {
-    if (pending && pending.name !== WEB_SEARCH_TOOL_NAME) passthrough.push(...pending.events);
+    if (pending && pending.name !== WEB_SEARCH_TOOL_NAME) {
+      passthrough.push(...pending.events);
+      hasRealToolCall = true;
+    }
     pending = null;
   };
   for (const e of events) {
@@ -52,6 +60,7 @@ export function scanEventsForWebSearch(events: AdapterEvent[]): { calls: WebSear
         calls.push({ id: pending.id, query });
       } else {
         passthrough.push(...pending.events);
+        hasRealToolCall = true;
       }
       pending = null;
     } else {
@@ -59,7 +68,7 @@ export function scanEventsForWebSearch(events: AdapterEvent[]): { calls: WebSear
     }
   }
   flushPending();
-  return { calls, passthrough };
+  return { calls, passthrough, hasRealToolCall };
 }
 
 async function* replay(events: AdapterEvent[]): AsyncGenerator<AdapterEvent> {
@@ -94,10 +103,21 @@ export async function runWithWebSearch(deps: WebSearchLoopDeps): Promise<Respons
   if (!adapter.parseResponse) return jsonError(500, "web-search sidecar requires a non-streaming adapter");
 
   const messages: OcxMessage[] = [...parsed.context.messages];
+  const allTools = parsed.context.tools ?? [];
+  // For the forced-answer pass we drop the synthetic web_search tool so the model MUST answer from the
+  // results already in `messages` (can't search again) — this guarantees a non-empty final answer.
+  const toolsNoWebSearch = allTools.filter(t => !t.webSearch);
+  let searchesExecuted = 0;
   let finalEvents: AdapterEvent[] = [];
 
-  for (let i = 0; i <= maxSearches; i++) {
-    const iterParsed: OcxParsedRequest = { ...parsed, stream: false, context: { ...parsed.context, messages } };
+  // Hard iteration bound (termination safety net); forceAnswer normally ends the loop sooner.
+  const HARD_CAP = maxSearches + 2;
+  for (let i = 0; i < HARD_CAP; i++) {
+    const forceAnswer = searchesExecuted >= maxSearches;
+    const iterParsed: OcxParsedRequest = {
+      ...parsed, stream: false,
+      context: { ...parsed.context, messages, tools: forceAnswer ? toolsNoWebSearch : allTools },
+    };
     const request = adapter.buildRequest(iterParsed, { headers: incomingHeaders });
     let resp: Response;
     try {
@@ -110,16 +130,27 @@ export async function runWithWebSearch(deps: WebSearchLoopDeps): Promise<Respons
       return jsonError(resp.status, `Provider error ${resp.status}: ${t.slice(0, 400)}`);
     }
     const events = await adapter.parseResponse(resp);
-    const { calls, passthrough } = scanEventsForWebSearch(events);
-    if (calls.length === 0 || i === maxSearches) {
+    const { calls, passthrough, hasRealToolCall } = scanEventsForWebSearch(events);
+    // Loop (search + re-ask) ONLY when the model's actionable output is purely web_search. A real
+    // tool call (e.g. shell/apply_patch) means this turn is terminal for Codex — finalize so those
+    // calls reach Codex instead of being discarded. forceAnswer also finalizes.
+    const shouldLoop = calls.length > 0 && !hasRealToolCall && !forceAnswer;
+    if (!shouldLoop) {
       finalEvents = passthrough;
       break;
     }
     const now = Date.now();
     for (const call of calls) {
-      const outcome = call.query
-        ? await runWebSearch(call.query, hostedTool, forwardProvider, incomingHeaders, settings)
-        : { text: "", sources: [], error: "the model called web_search with an empty query" };
+      let outcome: { text: string; sources: { url: string; title?: string }[]; error?: string };
+      if (searchesExecuted >= maxSearches) {
+        outcome = { text: "", sources: [], error: "web search limit reached for this turn — answer from results already gathered" };
+      } else if (!call.query) {
+        outcome = { text: "", sources: [], error: "the model called web_search with an empty query" };
+        searchesExecuted++;
+      } else {
+        outcome = await runWebSearch(call.query, hostedTool, forwardProvider, incomingHeaders, settings);
+        searchesExecuted++;
+      }
       messages.push({
         role: "assistant",
         content: [{ type: "toolCall", id: call.id, name: WEB_SEARCH_TOOL_NAME, arguments: { query: call.query } }],
