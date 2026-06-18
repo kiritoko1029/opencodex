@@ -1,0 +1,74 @@
+---
+title: How It Works
+description: The full opencodex request lifecycle — parse, route, adapt, bridge, and stream.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+Codex speaks exactly one protocol: the OpenAI **Responses API** (`POST /v1/responses`, Server-Sent
+Events). opencodex accepts that request, translates it to your provider's wire format, and translates
+the streamed answer back into Responses events — so Codex never knows it isn't talking to OpenAI.
+
+```
+            ┌──────────────────────────── opencodex ────────────────────────────┐
+            │                                                                     │
+ Codex ──▶  │  parser ──▶ router ──▶ [vision] ──▶ adapter ──▶ provider           │  ──▶ Codex
+ (/v1/      │     │          │          │            │           │                │     (SSE)
+  responses)│   OcxParsed  provider   describe    buildRequest  parseStream       │
+            │   Request    +adapter   images       + fetch      AdapterEvent[]    │
+            │                                          │           │              │
+            │                                  [web-search loop]  bridge ─▶ SSE   │
+            └─────────────────────────────────────────────────────────────────────┘
+```
+
+## The lifecycle
+
+<Steps>
+
+1. **Parse** — `responses/parser.ts` validates the request with a Zod schema (`responses/schema.ts`)
+   and lowers it into an internal `OcxParsedRequest`: system prompt, a normalized message list
+   (text, images, tool calls, tool results), the tool definitions, generation options, and feature
+   flags such as `_webSearch` (hosted web search requested) and `_structuredOutput` (a JSON schema /
+   JSON-object `text.format` was set). Images are preserved as real content parts — never inlined as
+   base64 text.
+
+2. **Route** — `router.ts` maps the requested model id to a configured provider using a fixed
+   precedence: explicit `provider/model` → a provider's `defaultModel` → a provider's `models[]` →
+   built-in prefix patterns (`claude-`, `gpt-`, `o1-`/`o3-`/`o4-`, `llama-`/`mixtral-`/`gemma-`) →
+   the `defaultProvider` fallback. See [Model Routing](/opencodex/guides/model-routing/).
+
+3. **Authenticate** — for an `oauth` provider, opencodex swaps in a fresh, auto-refreshed access
+   token as the bearer key, so the existing adapters authenticate unchanged.
+
+4. **Vision sidecar (optional)** — if the routed model is listed in `provider.noVisionModels` and the
+   request carries an image, opencodex describes each image with a `gpt-5.4-mini` vision model over
+   your ChatGPT login and replaces it with text, so a text-only model can still reason about it.
+   See [Sidecars](/opencodex/guides/sidecars/).
+
+5. **Passthrough fast path** — if the adapter is a passthrough (`openai-responses` in `forward` mode,
+   or `azure`), the raw request body is piped straight to the provider and the response streamed back
+   untouched. No translation happens.
+
+6. **Web-search sidecar (optional)** — if Codex enabled hosted `web_search` but the routed model is
+   non-OpenAI, opencodex exposes a synthetic `web_search` function tool and runs the model in a small
+   agentic loop, executing real searches through `gpt-5.4-mini` over your ChatGPT login and injecting
+   the results back as tool results.
+
+7. **Adapt** — otherwise the chosen adapter's `buildRequest()` produces the upstream HTTP request
+   (URL, headers, body) in the provider's native format, and opencodex `fetch`es it.
+
+8. **Bridge** — the adapter's `parseStream()` (or `parseResponse()`) yields internal `AdapterEvent`s
+   (text, reasoning, tool-call start/delta/end, done, error). `bridge.ts` converts that stream back
+   into Responses SSE events — `response.output_text.delta`, `response.reasoning_summary_text.delta`,
+   `response.function_call_arguments.delta`, `response.completed`, and so on — which Codex consumes.
+
+</Steps>
+
+## Why a proxy and not a Codex fork?
+
+Codex hard-codes the Responses API. By translating at the protocol boundary, opencodex works with the
+Codex **CLI, App, and SDK** unchanged, survives Codex updates, and lets you switch providers per
+request without touching Codex itself. The translation is bidirectional and streaming-faithful:
+reasoning summaries, MCP tool namespaces, freeform (`apply_patch`) tools, and `tool_search` discovery
+all round-trip correctly. See the [Architecture reference](/opencodex/reference/architecture/) for the
+event-by-event mapping.
