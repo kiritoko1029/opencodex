@@ -10,6 +10,34 @@ export interface VisionSettings {
 /** A description, or an `error` string when it couldn't run (caller injects a graceful marker). */
 export type DescribeOutcome = { text: string; error?: string };
 
+const ALLOWED_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"]);
+/** ~20 MB — generous enough for screenshots; rejects pathological payloads before forwarding. */
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+/** Bound the description so the vision model can't emit an unboundedly long (costly) response. */
+const VISION_MAX_OUTPUT_TOKENS = 1500;
+
+/**
+ * Validate an image URL before forwarding. Data URLs are checked for an allowed media type and a sane
+ * decoded size (a malformed/huge/unsupported one would otherwise 400 at the backend or waste tokens).
+ * Remote https URLs are passed through — the ChatGPT backend fetches them, not this proxy (so there's
+ * no SSRF surface here). Returns an error string when the URL must be rejected, else null.
+ */
+function validateImageUrl(url: string): string | null {
+  if (url.startsWith("data:")) {
+    const m = /^data:([^;,]+?)(;base64)?,(.*)$/s.exec(url);
+    if (!m) return "malformed data URL";
+    const mime = m[1].toLowerCase();
+    if (!ALLOWED_IMAGE_MIME.has(mime)) return `unsupported image type "${mime}"`;
+    if (m[2]) {
+      const bytes = Math.floor((m[3].length * 3) / 4);
+      if (bytes > MAX_IMAGE_BYTES) return `image too large (~${Math.round(bytes / 1024 / 1024)}MB)`;
+    }
+    return null;
+  }
+  if (url.startsWith("https://")) return null;
+  return "unsupported image URL scheme (expected data: or https:)";
+}
+
 /**
  * Describe ONE image via a gpt vision model through the ChatGPT forward backend — the path that has
  * native image input. Reuses the caller's forwarded OAuth headers. The user's own request text is
@@ -23,6 +51,9 @@ export async function describeImage(
   incomingHeaders: Headers,
   settings: VisionSettings,
 ): Promise<DescribeOutcome> {
+  const invalid = validateImageUrl(imageUrl);
+  if (invalid) return { text: "", error: invalid };
+
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (forwardProvider.headers) Object.assign(headers, forwardProvider.headers);
   for (const h of FORWARD_HEADERS) {
@@ -42,6 +73,7 @@ export async function describeImage(
       "what's relevant to the user's request. Output only the description.",
     input: [{ type: "message", role: "user", content }],
     reasoning: { effort: "low" },
+    max_output_tokens: VISION_MAX_OUTPUT_TOKENS,
     store: false,
     stream: true,
   };
