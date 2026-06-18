@@ -374,9 +374,22 @@ export function parseRequest(body: unknown): OcxParsedRequest {
   // gpt-mini sidecar for routed providers. buildTools still drops the hosted tool; the sidecar path
   // re-injects a synthetic function tool only when it will actually handle the call.
   const webSearch = extractHostedWebSearch(data.tools as unknown[] | undefined);
+  // Detect structured-output mode (Responses `text.format`) so the web-search sidecar can render its
+  // tool_result as JSON rather than prose that could corrupt the model's schema-constrained answer.
+  const structuredOutput = detectStructuredOutput(data.text);
 
   return {
     modelId: data.model, context, stream: data.stream === true, options, _rawBody: body,
     ...(webSearch ? { _webSearch: webSearch } : {}),
+    ...(structuredOutput ? { _structuredOutput: true } : {}),
   };
+}
+
+/** True when the Responses `text.format` requests structured output (json_schema or json_object). */
+function detectStructuredOutput(text: unknown): boolean {
+  if (!isObj(text)) return false;
+  const format = (text as { format?: unknown }).format;
+  if (!isObj(format)) return false;
+  const t = (format as { type?: unknown }).type;
+  return t === "json_schema" || t === "json_object";
 }

@@ -170,7 +170,7 @@ export async function runWithWebSearch(deps: WebSearchLoopDeps): Promise<Respons
       });
       messages.push({
         role: "toolResult", toolCallId: call.id, toolName: WEB_SEARCH_TOOL_NAME,
-        content: formatWebSearchResult(call.query, outcome), isError: !!outcome.error, timestamp: now,
+        content: formatWebSearchResult(call.query, outcome, !!parsed._structuredOutput), isError: !!outcome.error, timestamp: now,
       });
     }
   }

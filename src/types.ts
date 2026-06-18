@@ -10,6 +10,12 @@ export interface OcxParsedRequest {
    * executes searches via the gpt-5.4-mini sidecar (see src/web-search). Absent when not requested.
    */
   _webSearch?: Record<string, unknown>;
+  /**
+   * True when Codex requested structured output (`text.format` = json_schema/json_object). The
+   * web-search tool_result is then rendered as compact JSON instead of markdown prose, so its
+   * answer/"Sources:" text can't bleed into and corrupt the model's schema-constrained output.
+   */
+  _structuredOutput?: boolean;
 }
 
 export interface OcxContext {
