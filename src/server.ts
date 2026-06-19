@@ -140,17 +140,22 @@ async function handleResponses(req: Request, config: OcxConfig, logCtx: { model:
 
   if ("passthrough" in adapter && adapter.passthrough) {
     const request = adapter.buildRequest(parsed, { headers: req.headers });
+    // Abort the upstream if the client disconnects. A directly-relayed body does not propagate the
+    // consumer's cancel to a signalled fetch, so we pass the signal and relay through relayWithAbort,
+    // whose cancel() aborts the upstream — preventing leaked connections (RC2, passthrough path).
+    const upstream = new AbortController();
     let upstreamResponse: Response;
     try {
       upstreamResponse = await fetch(request.url, {
         method: request.method,
         headers: request.headers,
         body: request.body,
+        signal: upstream.signal,
       });
     } catch (err) {
       return formatErrorResponse(502, "upstream_error", `Provider unreachable: ${err instanceof Error ? err.message : String(err)}`);
     }
-    return new Response(upstreamResponse.body, {
+    return new Response(relayWithAbort(upstreamResponse.body, upstream), {
       status: upstreamResponse.status,
       headers: sanitizePassthroughHeaders(upstreamResponse.headers),
     });
@@ -234,6 +239,39 @@ const MAX_LOG_SIZE = 200;
 function addRequestLog(entry: typeof requestLog[number]) {
   requestLog.push(entry);
   if (requestLog.length > MAX_LOG_SIZE) requestLog.shift();
+}
+
+/**
+ * Relay an upstream body verbatim while wiring client-cancel -> upstream.abort(). A body returned
+ * directly from fetch does NOT propagate the consumer's cancel to a signalled fetch, so a client
+ * disconnect would leak the upstream connection. Pumping through this stream (whose cancel() aborts
+ * the upstream) fixes the leak with zero byte changes — passthrough fidelity is preserved (RC2).
+ */
+export function relayWithAbort(
+  body: ReadableStream<Uint8Array> | null,
+  upstream: AbortController,
+): ReadableStream<Uint8Array> | null {
+  if (!body) return null;
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (err) {
+        try { controller.error(err); } catch { /* already torn down */ }
+      }
+    },
+    cancel(reason) {
+      // Client disconnected: abort the upstream fetch and release the reader so we do not leak it.
+      upstream.abort(reason);
+      reader.cancel(reason).catch(() => {});
+    },
+  });
 }
 
 /**
