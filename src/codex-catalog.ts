@@ -55,11 +55,13 @@ function readCatalog(path: string): { models?: RawEntry[]; [k: string]: unknown 
 }
 
 function normalizeServiceTiers(entry: RawEntry): RawEntry {
-  if (entry.service_tier === "priority") entry.service_tier = "fast";
+  // Codex stores the user-facing config spelling as "fast", but the catalog/request
+  // service tier id is "priority" in current codex-rs. Keep legacy catalogs working.
+  if (entry.service_tier === "fast") entry.service_tier = "priority";
   if (Array.isArray(entry.service_tiers)) {
     entry.service_tiers = entry.service_tiers.map(tier => {
-      if (tier && typeof tier === "object" && "id" in tier && tier.id === "priority") {
-        return { ...tier, id: "fast" };
+      if (tier && typeof tier === "object" && "id" in tier && tier.id === "fast") {
+        return { ...tier, id: "priority" };
       }
       return tier;
     });

@@ -108,6 +108,28 @@ function normalizeServiceTier(content: string): string {
   return content.replace(/^(\s*service_tier\s*=\s*)["']priority["']\s*$/gm, '$1"fast"');
 }
 
+function ensureFastModeFeature(content: string): string {
+  const lines = content.split("\n");
+  const featuresStart = lines.findIndex(line => line.trim() === "[features]");
+  if (featuresStart === -1) {
+    return content.trimEnd() + "\n\n[features]\nfast_mode = true\n";
+  }
+
+  const nextTable = lines.findIndex((line, index) => index > featuresStart && /^\s*\[/.test(line));
+  const featuresEnd = nextTable === -1 ? lines.length : nextTable;
+  for (let i = featuresStart + 1; i < featuresEnd; i++) {
+    if (/^\s*fast_mode\s*=/.test(lines[i])) {
+      lines[i] = lines[i].replace(/^(\s*)fast_mode\s*=.*$/, "$1fast_mode = true");
+      return lines.join("\n");
+    }
+  }
+
+  let insertAt = featuresEnd;
+  while (insertAt > featuresStart + 1 && lines[insertAt - 1].trim() === "") insertAt--;
+  lines.splice(insertAt, 0, "fast_mode = true");
+  return lines.join("\n");
+}
+
 function stripDefaultCatalogPath(content: string): string {
   return content
     .split("\n")
@@ -124,6 +146,9 @@ function buildProfileFile(port: number, catalogPath: string): string {
     `# Routes all model requests through the opencodex proxy at localhost:${port}`,
     'model_provider = "opencodex"',
     `model_catalog_json = ${tomlString(catalogPath)}`,
+    "",
+    "[features]",
+    "fast_mode = true",
     "",
   ].join("\n");
 }
@@ -144,6 +169,7 @@ export async function injectCodexConfig(port: number, _config?: OcxConfig): Prom
   content = removeProfileSection(content);
   content = stripExistingModelProvider(content);
   content = normalizeServiceTier(content);
+  content = ensureFastModeFeature(content);
 
   const catalogPath = readRootModelCatalogPath(content) ?? DEFAULT_CATALOG_PATH;
   content = setRootModelCatalogPath(content, catalogPath);
