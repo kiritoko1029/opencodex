@@ -34,7 +34,7 @@ Codex CLI / App / SDK ──/v1/responses──▶ opencodex ──▶ Any provi
 
 ```bash
 # Install
-bun install -g opencodex      # or: npm install -g opencodex
+bun install -g opencx      # or: npm install -g opencx
 
 # Interactive setup (writes config + injects into Codex)
 ocx init
@@ -59,7 +59,7 @@ curl -fsSL https://bun.sh/install | bash
 powershell -c "irm bun.sh/install.ps1 | iex"
 ```
 
-Then re-run `bun install -g opencodex`. (The `ocx` binary is bun-native, so bun must be on your `PATH`.)
+Then re-run `bun install -g opencx`. (The `ocx` binary is bun-native, so bun must be on your `PATH`.)
 
 </details>
 

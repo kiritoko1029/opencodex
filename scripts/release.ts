@@ -12,7 +12,7 @@
  * Example:  bun scripts/release.ts 0.1.0            # dry-run release of 0.1.0
  *           bun scripts/release.ts 0.1.0 --publish  # actually publish 0.1.0
  *
- * Requires: gh CLI (authed) + an NPM_TOKEN repo secret for the actual publish.
+ * Requires: gh CLI (authed). Publishing is tokenless via Trusted Publishing (OIDC) — no NPM_TOKEN.
  */
 import { $ } from "bun";
 
@@ -64,4 +64,4 @@ await Bun.sleep(4000);
 await watchLatest();
 console.log(dryRun
   ? "\n✓ Dry run complete. Re-run with --publish to publish for real."
-  : "\n✓ Published. Try:  bun install -g opencodex");
+  : "\n✓ Published. Try:  bun install -g opencx");

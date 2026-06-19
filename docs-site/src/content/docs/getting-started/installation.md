@@ -18,10 +18,10 @@ sends your traffic anywhere except the provider you configure.
 
 ```bash
 # With Bun (recommended)
-bun install -g opencodex
+bun install -g opencx
 
 # With npm
-npm install -g opencodex
+npm install -g opencx
 ```
 
 Verify the binary is on your `PATH`:

@@ -18,10 +18,10 @@ provider 之外,绝不会把你的流量发送到任何地方。
 
 ```bash
 # With Bun (recommended)
-bun install -g opencodex
+bun install -g opencx
 
 # With npm
-npm install -g opencodex
+npm install -g opencx
 ```
 
 验证该二进制文件已在你的 `PATH` 中:
