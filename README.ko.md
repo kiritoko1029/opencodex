@@ -15,6 +15,10 @@
 
 </div>
 
+<p align="center">
+  <img src="assets/dashboard.png" alt="opencodex 대시보드 — 프록시 상태·프로바이더·모델을 보여주는 다크 컨트롤 패널" width="820">
+</p>
+
 Codex는 오직 Responses API(`/v1/responses`)만 사용합니다. opencodex는 Codex와 여러분의 LLM
 프로바이더 사이에 위치하여, 프로토콜을 실시간으로 변환합니다 — streaming, tool 호출, reasoning, 이미지까지
 모두 포함해서 — 양방향으로 동작합니다.
@@ -41,6 +45,23 @@ ocx start
 # Use Codex normally — it now routes through opencodex
 codex "Write a hello world in Rust"
 ```
+
+<details>
+<summary><b><a href="https://bun.sh">bun</a>이 없으신가요?</b> — 먼저 설치하세요 (opencodex는 bun에서 실행됩니다)</summary>
+
+<br/>
+
+```bash
+# macOS / Linux / WSL
+curl -fsSL https://bun.sh/install | bash
+
+# Windows (PowerShell)
+powershell -c "irm bun.sh/install.ps1 | iex"
+```
+
+설치 후 `bun install -g opencodex`를 다시 실행하세요. (`ocx` 바이너리는 bun 기반이라 bun이 `PATH`에 있어야 합니다.)
+
+</details>
 
 `provider/model` 형식으로 라우팅된 특정 모델을 지정할 수 있습니다:
 

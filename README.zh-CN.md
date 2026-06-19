@@ -15,6 +15,10 @@
 
 </div>
 
+<p align="center">
+  <img src="assets/dashboard.png" alt="opencodex 控制台 —— 展示代理状态、provider 与可用模型的深色控制面板" width="820">
+</p>
+
 Codex 只能使用 Responses API（`/v1/responses`）。opencodex 位于 Codex 与你的 LLM
 provider 之间，实时翻译两者之间的协议 —— 包括 streaming、工具调用、推理（reasoning）和图像
 —— 并且是双向的。
@@ -41,6 +45,23 @@ ocx start
 # Use Codex normally — it now routes through opencodex
 codex "Write a hello world in Rust"
 ```
+
+<details>
+<summary><b>没有 <a href="https://bun.sh">bun</a>？</b> —— 先安装它（opencodex 运行在 bun 上）</summary>
+
+<br/>
+
+```bash
+# macOS / Linux / WSL
+curl -fsSL https://bun.sh/install | bash
+
+# Windows (PowerShell)
+powershell -c "irm bun.sh/install.ps1 | iex"
+```
+
+然后重新运行 `bun install -g opencodex`。（`ocx` 可执行文件是 bun 原生的，因此 bun 必须在你的 `PATH` 中。）
+
+</details>
 
 使用 `provider/model` 形式指定一个具体的已路由模型：
 

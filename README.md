@@ -15,6 +15,10 @@
 
 </div>
 
+<p align="center">
+  <img src="assets/dashboard.png" alt="opencodex dashboard — a dark provider control panel showing live proxy status, routed providers, and available models" width="820">
+</p>
+
 Codex only speaks the Responses API (`/v1/responses`). opencodex sits between Codex and your LLM
 provider, translating the protocol on the fly — streaming, tool calls, reasoning, and images included
 — in both directions.
@@ -41,6 +45,23 @@ ocx start
 # Use Codex normally — it now routes through opencodex
 codex "Write a hello world in Rust"
 ```
+
+<details>
+<summary><b>Don't have <a href="https://bun.sh">bun</a>?</b> — install it first (opencodex runs on bun)</summary>
+
+<br/>
+
+```bash
+# macOS / Linux / WSL
+curl -fsSL https://bun.sh/install | bash
+
+# Windows (PowerShell)
+powershell -c "irm bun.sh/install.ps1 | iex"
+```
+
+Then re-run `bun install -g opencodex`. (The `ocx` binary is bun-native, so bun must be on your `PATH`.)
+
+</details>
 
 Target a specific routed model with the `provider/model` form:
 
