@@ -2,12 +2,11 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFil
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { atomicWriteFile } from "./config";
+import { CODEX_CONFIG_PATH, CODEX_MODELS_CACHE_PATH, DEFAULT_CATALOG_PATH, readRootTomlString, resolveCodexConfigPath } from "./codex-paths";
 import { DEFAULT_MODEL_CACHE_TTL_MS, getFreshCached, getStaleCached, setCached } from "./model-cache";
 import { buildModelsRequest, resolveModelsAuthToken } from "./oauth/index";
 import type { OcxConfig, OcxProviderConfig } from "./types";
 
-const CODEX_CONFIG_PATH = join(homedir(), ".codex", "config.toml");
-const DEFAULT_CATALOG_PATH = join(homedir(), ".codex", "opencodex-catalog.json");
 const OCX_DIR = join(homedir(), ".opencodex");
 const CATALOG_BACKUP_PATH = join(OCX_DIR, "catalog-backup.json");
 
@@ -40,8 +39,8 @@ export function readCodexCatalogPath(): string {
   try {
     if (existsSync(CODEX_CONFIG_PATH)) {
       const toml = readFileSync(CODEX_CONFIG_PATH, "utf-8");
-      const m = toml.match(/^\s*model_catalog_json\s*=\s*"([^"]+)"/m);
-      if (m) return m[1];
+      const path = readRootTomlString(toml, "model_catalog_json");
+      if (path) return resolveCodexConfigPath(path);
     }
   } catch { /* ignore */ }
   return DEFAULT_CATALOG_PATH;
@@ -55,13 +54,36 @@ function readCatalog(path: string): { models?: RawEntry[]; [k: string]: unknown 
   } catch { return null; }
 }
 
+function normalizeServiceTiers(entry: RawEntry): RawEntry {
+  if (entry.service_tier === "priority") entry.service_tier = "fast";
+  if (Array.isArray(entry.service_tiers)) {
+    entry.service_tiers = entry.service_tiers.map(tier => {
+      if (tier && typeof tier === "object" && "id" in tier && tier.id === "priority") {
+        return { ...tier, id: "fast" };
+      }
+      return tier;
+    });
+  }
+  return entry;
+}
+
+function loadCatalogForSync(path: string): { models?: RawEntry[]; [k: string]: unknown } | null {
+  const catalog = readCatalog(path);
+  if (catalog) return catalog;
+  return readCatalog(CODEX_MODELS_CACHE_PATH);
+}
+
+function readCurrentCatalogOrCache(): { models?: RawEntry[]; [k: string]: unknown } | null {
+  return readCatalog(readCodexCatalogPath()) ?? readCatalog(CODEX_MODELS_CACHE_PATH);
+}
+
 /**
  * A full native entry from the on-disk catalog, used as a clone template so injected
  * entries carry EVERY field Codex's strict parser requires (e.g. `base_instructions`).
  * Returns a deep copy, or null if no catalog/native entry exists.
  */
 export function loadCatalogTemplate(): RawEntry | null {
-  const cat = readCatalog(readCodexCatalogPath());
+  const cat = readCurrentCatalogOrCache();
   const native = cat?.models?.find(
     m => typeof m.slug === "string" && !m.slug.includes("/") && "base_instructions" in m,
   );
@@ -109,16 +131,16 @@ function deriveEntry(template: RawEntry | null, slug: string, desc: string, prio
       e.supported_reasoning_levels = ROUTED_REASONING_LEVELS.map(l => byEffort.get(l.effort) ?? { ...l });
       e.default_reasoning_level = "medium";
     }
-    return e;
+    return normalizeServiceTiers(e);
   }
   // Fallback when no template is available (best-effort; strict parser may need more).
-  return {
+  return normalizeServiceTiers({
     slug, display_name: slug, description: desc,
     default_reasoning_level: "medium",
     supported_reasoning_levels: ROUTED_REASONING_LEVELS.map(l => ({ ...l })),
     shell_type: "shell_command", visibility: "list", supported_in_api: true,
     priority, base_instructions: "You are a helpful coding assistant.",
-  };
+  });
 }
 
 /**
@@ -149,7 +171,7 @@ export function buildCatalogEntries(template: RawEntry | null, gptSlugs: string[
 
 /** Bare picker-visible native slugs in the live Codex catalog (drives the subagent picker UI). */
 export function listCatalogNativeSlugs(): string[] {
-  const cat = readCatalog(readCodexCatalogPath());
+  const cat = readCurrentCatalogOrCache();
   return (cat?.models ?? [])
     .filter(m => typeof m.slug === "string" && !(m.slug as string).includes("/") && m.visibility === "list")
     .map(m => m.slug as string);
@@ -244,7 +266,7 @@ export function orderForSubagents(goModels: CatalogModel[], featured?: string[])
  */
 export async function syncCatalogModels(config: OcxConfig): Promise<{ added: number; path: string }> {
   const catalogPath = readCodexCatalogPath();
-  const catalog = readCatalog(catalogPath);
+  const catalog = loadCatalogForSync(catalogPath);
   if (!catalog) return { added: 0, path: catalogPath };
 
   const template = (catalog.models ?? []).find(
@@ -272,9 +294,9 @@ export async function syncCatalogModels(config: OcxConfig): Promise<{ added: num
     .map(m => {
       const slug = m.slug as string;
       const priority = rank.has(slug) ? rank.get(slug)! : (baseline.get(slug) ?? (m.priority as number));
-      return { ...m, priority };
+      return normalizeServiceTiers({ ...m, priority });
     });
-  catalog.models = [...native, ...goEntries];
+  catalog.models = [...native, ...goEntries].map(m => normalizeServiceTiers(m));
 
   try {
     if (!existsSync(OCX_DIR)) mkdirSync(OCX_DIR, { recursive: true });

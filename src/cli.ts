@@ -37,9 +37,12 @@ async function syncModelsToCodex(port?: number) {
   const { injectCodexConfig } = await import("./codex-inject");
   const result = await injectCodexConfig(p, config);
   try {
-    const { syncCatalogModels } = await import("./codex-catalog");
+    const { invalidateCodexModelsCache, syncCatalogModels } = await import("./codex-catalog");
     const cat = await syncCatalogModels(config);
-    if (cat.added > 0) console.log(`   + ${cat.added} models appended to Codex catalog (${cat.path})`);
+    if (cat.added > 0) {
+      invalidateCodexModelsCache();
+      console.log(`   + ${cat.added} models appended to Codex catalog (${cat.path})`);
+    }
   } catch (e) {
     console.error("catalog sync skipped:", e instanceof Error ? e.message : String(e));
   }

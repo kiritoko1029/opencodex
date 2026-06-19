@@ -1,13 +1,8 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { atomicWriteFile } from "./config";
 import { restoreCodexCatalog } from "./codex-catalog";
+import { CODEX_CONFIG_PATH, CODEX_PROFILE_PATH, DEFAULT_CATALOG_PATH, parseTomlString, readRootTomlString, tomlString } from "./codex-paths";
 import type { OcxConfig } from "./types";
-
-const CODEX_HOME = join(homedir(), ".codex");
-const CODEX_CONFIG_PATH = join(CODEX_HOME, "config.toml");
-const CODEX_PROFILE_PATH = join(CODEX_HOME, "opencodex.config.toml");
 
 const OCX_SECTION_MARKER = "# Auto-injected by opencodex";
 
@@ -29,6 +24,15 @@ function buildProviderTableBlock(port: number): string {
     'wire_api = "responses"',
   ];
   return lines.join("\n") + "\n";
+}
+
+function buildProfileTableBlock(catalogPath: string): string {
+  return [
+    "",
+    "[profiles.opencodex]",
+    'model_provider = "opencodex"',
+    `model_catalog_json = ${tomlString(catalogPath)}`,
+  ].join("\n") + "\n";
 }
 
 /**
@@ -70,11 +74,65 @@ function setRootModelProvider(content: string): string {
   return lines.join("\n");
 }
 
-function buildProfileFile(port: number): string {
+function readRootModelCatalogPath(content: string): string | null {
+  return readRootTomlString(content, "model_catalog_json");
+}
+
+function setRootModelCatalogPath(content: string, catalogPath: string): string {
+  if (readRootModelCatalogPath(content)) return content;
+  const lines = content.split("\n");
+  const firstTable = lines.findIndex(l => /^\s*\[/.test(l));
+  const key = `model_catalog_json = ${tomlString(catalogPath)}`;
+  if (firstTable === -1) {
+    return content.replace(/\n+$/, "") + "\n" + key + "\n";
+  }
+  let insertAt = firstTable;
+  while (insertAt > 0 && lines[insertAt - 1].trim() === "") insertAt--;
+  lines.splice(insertAt, 0, key);
+  return lines.join("\n");
+}
+
+function removeProfileSection(content: string): string {
+  const lines = content.split("\n");
+  const filtered: string[] = [];
+  let inProfile = false;
+  for (const line of lines) {
+    if (line.trim() === "[profiles.opencodex]") {
+      inProfile = true;
+      continue;
+    }
+    if (inProfile) {
+      if (line.startsWith("[") && line.trim() !== "[profiles.opencodex]") {
+        inProfile = false;
+        filtered.push(line);
+      }
+      continue;
+    }
+    filtered.push(line);
+  }
+  return filtered.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
+function normalizeServiceTier(content: string): string {
+  return content.replace(/^(\s*service_tier\s*=\s*)["']priority["']\s*$/gm, '$1"fast"');
+}
+
+function stripDefaultCatalogPath(content: string): string {
+  return content
+    .split("\n")
+    .filter(line => {
+      const m = line.match(/^\s*model_catalog_json\s*=\s*("(?:\\.|[^"])*"|'[^']*')\s*$/);
+      return !m || parseTomlString(m[1]) !== DEFAULT_CATALOG_PATH;
+    })
+    .join("\n");
+}
+
+function buildProfileFile(port: number, catalogPath: string): string {
   return [
     "# OpenCodex proxy profile — use with: codex --profile opencodex",
     `# Routes all model requests through the opencodex proxy at localhost:${port}`,
     'model_provider = "opencodex"',
+    `model_catalog_json = ${tomlString(catalogPath)}`,
     "",
   ].join("\n");
 }
@@ -92,15 +150,21 @@ export async function injectCodexConfig(port: number, _config?: OcxConfig): Prom
   if (content.includes("[model_providers.opencodex]")) {
     content = removeOcxSection(content);
   }
+  content = removeProfileSection(content);
   content = stripExistingModelProvider(content);
+  content = normalizeServiceTier(content);
+
+  const catalogPath = readRootModelCatalogPath(content) ?? DEFAULT_CATALOG_PATH;
+  content = setRootModelCatalogPath(content, catalogPath);
 
   // 1) Root key BEFORE the first table header (must be a global, not nested under a table).
   content = setRootModelProvider(content);
   // 2) Provider table appended at EOF (position-independent).
   content = content.trimEnd() + "\n" + buildProviderTableBlock(port);
+  content = content.trimEnd() + "\n" + buildProfileTableBlock(catalogPath);
 
   writeFileSync(CODEX_CONFIG_PATH, content, "utf-8");
-  writeFileSync(CODEX_PROFILE_PATH, buildProfileFile(port), "utf-8");
+  writeFileSync(CODEX_PROFILE_PATH, buildProfileFile(port, catalogPath), "utf-8");
 
   return {
     success: true,
@@ -141,9 +205,11 @@ export function stripOpencodexConfig(content: string): string {
   if (out.includes("[model_providers.opencodex]")) {
     out = removeOcxSection(out);
   }
+  out = removeProfileSection(out);
   // Regex (not exact-string) removal so compact `model_provider="opencodex"` is stripped too —
   // must match the detection regex above, or a detected line could survive un-removed.
   out = out.split("\n").filter(l => !/^\s*model_provider\s*=\s*"opencodex"\s*$/.test(l)).join("\n");
+  out = stripDefaultCatalogPath(out);
   return out.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
