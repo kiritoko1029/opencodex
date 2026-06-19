@@ -8,10 +8,21 @@
     "opencodex": "./src/cli.ts",
     "ocx": "./src/cli.ts"
   },
+  "files": [
+    "src",
+    "gui/dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.1.0"
+  },
   "scripts": {
     "dev": "bun run src/cli.ts start",
     "start": "bun run src/cli.ts start",
-    "typecheck": "bun x tsc --noEmit"
+    "typecheck": "bun x tsc --noEmit",
+    "build:gui": "cd gui && bun install && bun run build",
+    "prepublishOnly": "bun run typecheck && bun run build:gui"
   },
   "dependencies": {
     "zod": "^4.0.0"
@@ -29,5 +40,13 @@
     "anthropic",
     "responses-api"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lidge-jun/opencodex.git"
+  },
+  "homepage": "https://lidge-jun.github.io/opencodex/",
+  "bugs": {
+    "url": "https://github.com/lidge-jun/opencodex/issues"
+  },
   "license": "MIT"
 }
