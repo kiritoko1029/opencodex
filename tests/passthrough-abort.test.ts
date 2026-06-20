@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { relayWithAbort } from "../src/server";
+import { linkAbortSignal, relayWithAbort } from "../src/server";
 
 function streamFromChunks(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
   let i = 0;
@@ -44,5 +44,15 @@ describe("passthrough relayWithAbort (RC2, passthrough path)", () => {
     const ac = new AbortController();
     expect(relayWithAbort(null, ac)).toBeNull();
     expect(ac.signal.aborted).toBe(false);
+  });
+
+  test("turn-level abort signal aborts the upstream fetch before headers arrive", () => {
+    const upstream = new AbortController();
+    const turn = new AbortController();
+    linkAbortSignal(upstream, turn.signal);
+    expect(upstream.signal.aborted).toBe(false);
+    turn.abort("replacement turn");
+    expect(upstream.signal.aborted).toBe(true);
+    expect(upstream.signal.reason).toBe("replacement turn");
   });
 });

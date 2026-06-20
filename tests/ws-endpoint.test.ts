@@ -193,10 +193,18 @@ describe("WS endpoint re-framer (120/132)", () => {
       "set-cookie": "secret=1",
       "x-ratelimit-remaining": "4",
       "x-codex-turn-state": "state",
+      "x-codex-primary-used-percent": "100.0",
+      "x-codex-primary-window-minutes": "15",
+      "x-codex-secondary-primary-reset-at": "1781928000",
+      "x-codex-secondary-limit-name": "Secondary",
     }));
     expect(outbound).toEqual({
       "retry-after": "2",
       "x-codex-turn-state": "state",
+      "x-codex-primary-used-percent": "100.0",
+      "x-codex-primary-window-minutes": "15",
+      "x-codex-secondary-primary-reset-at": "1781928000",
+      "x-codex-secondary-limit-name": "Secondary",
       "x-ratelimit-remaining": "4",
     });
   });
@@ -221,6 +229,24 @@ describe("WS endpoint re-framer (120/132)", () => {
       { headers: { "content-type": "text/event-stream" } },
     ), () => true);
     expect(JSON.parse(sent[0]).type).toBe("response.completed");
+  });
+
+  test("cancels a stale successful response body before pumping", async () => {
+    const { ws, sent } = mockWs();
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          'data: {"type":"response.completed","response":{"id":"stale"}}\n\n',
+        ));
+      },
+      cancel() { cancelled = true; },
+    });
+    await sendResponseToWebSocket(ws, new Response(body, {
+      headers: { "content-type": "text/event-stream" },
+    }), () => false);
+    expect(sent).toEqual([]);
+    expect(cancelled).toBe(true);
   });
 
   test("sniffs mislabelled SSE responses", async () => {

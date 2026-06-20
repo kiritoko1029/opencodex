@@ -100,7 +100,7 @@ async function handleResponses(
   req: Request,
   config: OcxConfig,
   logCtx: { model: string; provider: string },
-  options: { forceEmptyResponseId?: boolean } = {},
+  options: { forceEmptyResponseId?: boolean; abortSignal?: AbortSignal } = {},
 ): Promise<Response> {
   let body: unknown;
   try {
@@ -161,6 +161,7 @@ async function handleResponses(
     // consumer's cancel to a signalled fetch, so we pass the signal and relay through relayWithAbort,
     // whose cancel() aborts the upstream — preventing leaked connections (RC2, passthrough path).
     const upstream = new AbortController();
+    linkAbortSignal(upstream, options.abortSignal);
     let upstreamResponse: Response;
     try {
       upstreamResponse = await fetch(request.url, {
@@ -199,6 +200,7 @@ async function handleResponses(
   // Abort the upstream fetch if the client (Codex) disconnects mid-stream, so a cancelled turn does
   // not leak the upstream connection or keep draining tokens. The bridge's cancel() fires upstream.abort() (RC2).
   const upstream = new AbortController();
+  linkAbortSignal(upstream, options.abortSignal);
   let upstreamResponse: Response;
   try {
     upstreamResponse = await fetch(request.url, {
@@ -257,6 +259,15 @@ async function handleResponses(
   }
 
   return formatErrorResponse(500, "internal_error", "Non-streaming not supported by this adapter");
+}
+
+export function linkAbortSignal(upstream: AbortController, signal?: AbortSignal): void {
+  if (!signal) return;
+  if (signal.aborted) {
+    upstream.abort(signal.reason);
+    return;
+  }
+  signal.addEventListener("abort", () => upstream.abort(signal.reason), { once: true });
 }
 
 const requestLog: { timestamp: number; model: string; provider: string; status: number; durationMs: number }[] = [];
@@ -620,12 +631,18 @@ export function startServer(port?: number) {
         const turnId = (ws.data.turnId ?? 0) + 1;
         ws.data.turnId = turnId;
         const isCurrent = () => ws.data.turnId === turnId;
+        const turnAbort = new AbortController();
+        const cancelTurn = () => {
+          turnAbort.abort("websocket turn superseded or closed");
+        };
+        ws.data.cancel = cancelTurn;
 
         if (frame.generate === false) {
           for (const payload of buildWarmupCompletionFrames(frame)) {
             if (!isCurrent()) return;
             sendTextFrame(ws, payload);
           }
+          if (ws.data.cancel === cancelTurn) ws.data.cancel = undefined;
           return;
         }
 
@@ -641,7 +658,10 @@ export function startServer(port?: number) {
             body: JSON.stringify({ ...payload, stream: true }),
           });
           try {
-            const response = await handleResponses(req, config, logCtx, { forceEmptyResponseId: true });
+            const response = await handleResponses(req, config, logCtx, {
+              forceEmptyResponseId: true,
+              abortSignal: turnAbort.signal,
+            });
             await sendResponseToWebSocket(ws, response, isCurrent);
           } catch (err) {
             if (!isCurrent()) return;
@@ -653,6 +673,8 @@ export function startServer(port?: number) {
             } catch {
               /* socket already gone or send dropped */
             }
+          } finally {
+            if (ws.data.cancel === cancelTurn) ws.data.cancel = undefined;
           }
         })();
       },

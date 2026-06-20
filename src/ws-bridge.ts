@@ -38,7 +38,12 @@ export function safeResponseHeaders(headers: Headers): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [name, value] of headers) {
     const lower = name.toLowerCase();
-    if (SAFE_RESPONSE_HEADER_EXACT.has(lower) || lower.startsWith("x-ratelimit-")) {
+    if (
+      SAFE_RESPONSE_HEADER_EXACT.has(lower) ||
+      lower.startsWith("x-ratelimit-") ||
+      /^x-codex(?:-[a-z0-9-]+)?-(primary|secondary)-(used-percent|window-minutes|reset-at)$/.test(lower) ||
+      /^x-codex(?:-[a-z0-9-]+)?-limit-name$/.test(lower)
+    ) {
       out[lower] = value;
     }
   }
@@ -240,7 +245,10 @@ export async function sendResponseToWebSocket(
   response: Response,
   isCurrent: () => boolean,
 ): Promise<void> {
-  if (!isCurrent()) return;
+  if (!isCurrent()) {
+    await response.body?.cancel().catch(() => {});
+    return;
+  }
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
@@ -273,7 +281,10 @@ export async function sendResponseToWebSocket(
   }
 
   const { prefix, stream } = await readBoundedPrefix(response.body);
-  if (!isCurrent()) return;
+  if (!isCurrent()) {
+    await stream.cancel().catch(() => {});
+    return;
+  }
   if (looksLikeSse(prefix)) {
     await pumpResponsesSseToWebSocket(ws, stream, { isCurrent });
     return;
