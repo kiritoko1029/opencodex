@@ -79,6 +79,27 @@ status to **verified** in `00_overview.md`. If WS underperforms or regresses vs 
 be shipped with the flag **off** by default (HTTP remains the supported path) until issues are
 resolved — `12_`'s flag makes that a config toggle, not a code revert.
 
+## Results — executed 2026-06-20 (120.2 + 120.4 PASS)
+
+Live runs against the real `opencode-go` upstream (saved token), isolated repo build on port
+10199; codex catalog backed up and restored around the flag tests.
+
+| Check | Result |
+|-------|--------|
+| WS upgrade + full data plane (120.2) | PASS — `ws://…/v1/responses` → `response.create` → real opencode-go bridge → `response.completed` (26 frames, content deltas present), no server crash |
+| WS client-disconnect (RC2 over WS) | PASS — covered by `ws-endpoint` unit test (cancel hook aborts the reader); HTTP-path RC2 validated live in `110/55` |
+| Flag OFF → on-disk catalog (the file Codex reads) | PASS — native `gpt-5.5` **and** routed `opencode-go/kimi-k2.7-code` both `supports_websockets` ABSENT → Codex uses HTTP (native-leak closed) |
+| Flag ON → on-disk catalog | PASS — native **and** routed both `supports_websockets=true` → Codex opens WS |
+| HTTP path still served (coexistence/fallback) | PASS — HTTP `/v1/responses` bridge validated live in `110/55`; WS is additive |
+
+Note: the flag is applied to the **on-disk** `~/.codex/opencodex-catalog.json` written by
+`syncCatalogModels` (the file Codex reads via `model_catalog_json`), not only the `/v1/models`
+HTTP response — both paths now honor `config.websockets`. **120.2 + 120.4 status: verified.**
+
+Deferred (by plan): driving the actual Codex CLI binary end-to-end over WS (gold-standard manual
+check — enable `config.websockets`, restart `ocx`, run a routed turn) and native upstream WS
+(`11_`, optional).
+
 ## Non-goals
 
 - Not a throughput benchmark (parity/correctness only).
