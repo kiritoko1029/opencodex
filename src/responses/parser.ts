@@ -188,7 +188,7 @@ function findToolNameById(messages: OcxMessage[], callId: string): string {
   return "";
 }
 
-const REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max"]);
+const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 export function parseRequest(body: unknown): OcxParsedRequest {
   const parsed = responsesRequestSchema.safeParse(body);

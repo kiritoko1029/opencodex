@@ -25,7 +25,7 @@ function nativeTemplate(): Record<string, unknown> {
 }
 
 const EXPECTED_KEY_PROVIDER_IDS = [
-  "openai-apikey", "opencode-go", "openrouter", "groq", "google", "azure-openai",
+  "openai-apikey", "opencode-go", "neuralwatt", "openrouter", "groq", "google", "azure-openai",
   "deepseek", "cerebras", "together", "fireworks", "firepass", "moonshot",
   "huggingface", "nvidia", "venice", "zai", "nanogpt", "synthetic", "qwen-portal",
   "qianfan", "alibaba", "parallel", "zenmux", "litellm", "ollama-cloud", "mistral",

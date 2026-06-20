@@ -121,24 +121,40 @@ export function buildModelsRequest(prov: OcxProviderConfig, apiKey: string | und
  * Only touches providers that are registry-managed AND still `authMode: "oauth"`, and only the
  * preset fields (never apiKey/baseUrl/user toggles). Persists + returns true when anything changed.
  */
+function cloneProviderField(value: unknown): unknown {
+  if (Array.isArray(value)) return [...value];
+  if (value && typeof value === "object") return JSON.parse(JSON.stringify(value));
+  return value;
+}
+
+const OAUTH_RECONCILE_FIELDS: (keyof OcxProviderConfig)[] = [
+  "models",
+  "noReasoningModels",
+  "noVisionModels",
+  "reasoningEfforts",
+  "modelReasoningEfforts",
+  "reasoningEffortMap",
+  "modelReasoningEffortMap",
+  "noTemperatureModels",
+  "noTopPModels",
+  "noPenaltyModels",
+  "autoToolChoiceOnlyModels",
+  "preserveReasoningContentModels",
+];
+
 export function reconcileOAuthProviders(config: OcxConfig): boolean {
   let changed = false;
   for (const [name, prov] of Object.entries(config.providers)) {
     const def = OAUTH_PROVIDERS[name];
     if (!def || prov.authMode !== "oauth") continue;
     const preset = def.providerConfig;
-    if (preset.models && JSON.stringify(prov.models) !== JSON.stringify(preset.models)) {
-      prov.models = [...preset.models];
-      changed = true;
-    }
-    if (JSON.stringify(prov.noReasoningModels) !== JSON.stringify(preset.noReasoningModels)) {
-      if (preset.noReasoningModels) prov.noReasoningModels = [...preset.noReasoningModels];
-      else delete prov.noReasoningModels;
-      changed = true;
-    }
-    if (JSON.stringify(prov.noVisionModels) !== JSON.stringify(preset.noVisionModels)) {
-      if (preset.noVisionModels) prov.noVisionModels = [...preset.noVisionModels];
-      else delete prov.noVisionModels;
+    for (const field of OAUTH_RECONCILE_FIELDS) {
+      if (JSON.stringify(prov[field]) === JSON.stringify(preset[field])) continue;
+      if (preset[field] !== undefined) {
+        prov[field] = cloneProviderField(preset[field]) as never;
+      } else {
+        delete prov[field];
+      }
       changed = true;
     }
     // Heal a defaultModel that no longer exists in the refreshed list (e.g. a deprecated snapshot).

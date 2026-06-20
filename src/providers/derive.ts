@@ -8,8 +8,17 @@ export interface DerivedKeyLoginProvider {
   dashboardUrl: string;
   models?: string[];
   defaultModel?: string;
+  reasoningEfforts?: string[];
+  modelReasoningEfforts?: Record<string, string[]>;
+  reasoningEffortMap?: Record<string, string>;
+  modelReasoningEffortMap?: Record<string, Record<string, string>>;
   noVisionModels?: string[];
   noReasoningModels?: string[];
+  noTemperatureModels?: string[];
+  noTopPModels?: string[];
+  noPenaltyModels?: string[];
+  autoToolChoiceOnlyModels?: string[];
+  preserveReasoningContentModels?: string[];
 }
 
 export interface DerivedInitProvider {
@@ -38,6 +47,14 @@ export function listRegistryEntries(): readonly ProviderRegistryEntry[] {
   return PROVIDER_REGISTRY;
 }
 
+function cloneRecordOfArrays(input: Record<string, string[]>): Record<string, string[]> {
+  return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, [...value]]));
+}
+
+function cloneNestedRecord(input: Record<string, Record<string, string>>): Record<string, Record<string, string>> {
+  return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, { ...value }]));
+}
+
 export function providerConfigSeed(entry: ProviderRegistryEntry): OcxProviderConfig {
   return {
     adapter: entry.adapter,
@@ -45,8 +62,17 @@ export function providerConfigSeed(entry: ProviderRegistryEntry): OcxProviderCon
     authMode: entry.authKind === "local" ? undefined : entry.authKind,
     ...(entry.defaultModel ? { defaultModel: entry.defaultModel } : {}),
     ...(entry.models ? { models: [...entry.models] } : {}),
+    ...(entry.reasoningEfforts ? { reasoningEfforts: [...entry.reasoningEfforts] } : {}),
+    ...(entry.modelReasoningEfforts ? { modelReasoningEfforts: cloneRecordOfArrays(entry.modelReasoningEfforts) } : {}),
+    ...(entry.reasoningEffortMap ? { reasoningEffortMap: { ...entry.reasoningEffortMap } } : {}),
+    ...(entry.modelReasoningEffortMap ? { modelReasoningEffortMap: cloneNestedRecord(entry.modelReasoningEffortMap) } : {}),
     ...(entry.noVisionModels ? { noVisionModels: [...entry.noVisionModels] } : {}),
     ...(entry.noReasoningModels ? { noReasoningModels: [...entry.noReasoningModels] } : {}),
+    ...(entry.noTemperatureModels ? { noTemperatureModels: [...entry.noTemperatureModels] } : {}),
+    ...(entry.noTopPModels ? { noTopPModels: [...entry.noTopPModels] } : {}),
+    ...(entry.noPenaltyModels ? { noPenaltyModels: [...entry.noPenaltyModels] } : {}),
+    ...(entry.autoToolChoiceOnlyModels ? { autoToolChoiceOnlyModels: [...entry.autoToolChoiceOnlyModels] } : {}),
+    ...(entry.preserveReasoningContentModels ? { preserveReasoningContentModels: [...entry.preserveReasoningContentModels] } : {}),
   };
 }
 
@@ -62,8 +88,17 @@ export function deriveKeyLoginMap(): Record<string, DerivedKeyLoginProvider> {
       dashboardUrl: entry.dashboardUrl,
       ...(entry.models ? { models: [...entry.models] } : {}),
       ...(entry.defaultModel ? { defaultModel: entry.defaultModel } : {}),
+      ...(entry.reasoningEfforts ? { reasoningEfforts: [...entry.reasoningEfforts] } : {}),
+      ...(entry.modelReasoningEfforts ? { modelReasoningEfforts: cloneRecordOfArrays(entry.modelReasoningEfforts) } : {}),
+      ...(entry.reasoningEffortMap ? { reasoningEffortMap: { ...entry.reasoningEffortMap } } : {}),
+      ...(entry.modelReasoningEffortMap ? { modelReasoningEffortMap: cloneNestedRecord(entry.modelReasoningEffortMap) } : {}),
       ...(entry.noVisionModels ? { noVisionModels: [...entry.noVisionModels] } : {}),
       ...(entry.noReasoningModels ? { noReasoningModels: [...entry.noReasoningModels] } : {}),
+      ...(entry.noTemperatureModels ? { noTemperatureModels: [...entry.noTemperatureModels] } : {}),
+      ...(entry.noTopPModels ? { noTopPModels: [...entry.noTopPModels] } : {}),
+      ...(entry.noPenaltyModels ? { noPenaltyModels: [...entry.noPenaltyModels] } : {}),
+      ...(entry.autoToolChoiceOnlyModels ? { autoToolChoiceOnlyModels: [...entry.autoToolChoiceOnlyModels] } : {}),
+      ...(entry.preserveReasoningContentModels ? { preserveReasoningContentModels: [...entry.preserveReasoningContentModels] } : {}),
     };
   }
   return out;

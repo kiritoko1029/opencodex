@@ -222,10 +222,32 @@ export interface OcxProviderConfig {
    */
   authMode?: "key" | "forward" | "oauth";
   /**
+   * Provider-wide Codex-visible reasoning tiers for routed models. Use only Codex-supported labels
+   * here (`low`, `medium`, `high`, `xhigh`); translate to provider-specific wire values with
+   * `reasoningEffortMap` / `modelReasoningEffortMap` below.
+   */
+  reasoningEfforts?: string[];
+  /** Model-specific Codex-visible reasoning tiers. An empty array means “do not expose effort”. */
+  modelReasoningEfforts?: Record<string, string[]>;
+  /** Provider-wide mapping from Codex effort labels to upstream `reasoning_effort` values. */
+  reasoningEffortMap?: Record<string, string>;
+  /** Model-specific mapping from Codex effort labels to upstream `reasoning_effort` values. */
+  modelReasoningEffortMap?: Record<string, Record<string, string>>;
+  /**
    * Model ids that do NOT support a reasoning/thinking parameter. The openai-chat adapter drops
    * reasoning_effort for these even when Codex selects a reasoning level (e.g. xAI grok-build-0.1).
    */
   noReasoningModels?: string[];
+  /** Model ids that reject caller-specified temperature. */
+  noTemperatureModels?: string[];
+  /** Model ids that reject caller-specified top_p. */
+  noTopPModels?: string[];
+  /** Model ids that reject caller-specified presence/frequency penalty values. */
+  noPenaltyModels?: string[];
+  /** Model ids whose tool_choice only accepts `auto` or `none`; forced/named choices are downgraded. */
+  autoToolChoiceOnlyModels?: string[];
+  /** Model ids that expect prior assistant `reasoning_content` to be preserved in chat history. */
+  preserveReasoningContentModels?: string[];
   /**
    * Model ids that do NOT accept image inputs. The proxy gives them "eyes" via the vision sidecar:
    * attached images are described by a gpt vision model and replaced with text before the call.

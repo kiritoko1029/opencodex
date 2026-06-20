@@ -6,6 +6,7 @@ import { CODEX_CONFIG_PATH, CODEX_MODELS_CACHE_PATH, DEFAULT_CATALOG_PATH, readR
 import { DEFAULT_MODEL_CACHE_TTL_MS, getFreshCached, getStaleCached, setCached } from "./model-cache";
 import { buildModelsRequest, resolveModelsAuthToken } from "./oauth/index";
 import type { OcxConfig, OcxProviderConfig } from "./types";
+import { CODEX_REASONING_LEVELS, configuredReasoningEfforts, sanitizeCodexReasoningEfforts } from "./reasoning-effort";
 import { getJawcodeModelMetadata, getJawcodeModelMetadataCaseInsensitive, listJawcodeModelMetadata, resolveJawcodeProvider } from "./generated/jawcode-model-metadata";
 import { shouldCaseFoldMetadataModelId } from "./providers/derive";
 
@@ -33,7 +34,7 @@ export function nativeOpenAiSlugs(): string[] {
   return live.length > 0 ? live : NATIVE_OPENAI_MODELS;
 }
 
-export interface CatalogModel { id: string; provider: string; owned_by?: string; }
+export interface CatalogModel { id: string; provider: string; owned_by?: string; reasoningEfforts?: string[]; contextWindow?: number; inputModalities?: string[]; }
 type RawEntry = Record<string, unknown>;
 const JAWCODE_CATALOG_AUGMENT_PROVIDERS = new Set(["opencode-go"]);
 
@@ -171,19 +172,42 @@ export function loadCatalogTemplate(): RawEntry | null {
 }
 
 /**
- * The reasoning ladder advertised for routed models in Codex's picker: low → medium → high → xhigh.
- * This matches Codex's NATIVE catalog exactly — Codex's strict parser rejects an unknown effort like
- * `max`, so it must not be advertised here. (Previously routed models were clamped down to
- * low/medium/high, which dropped the `xhigh` that Codex does support.)
+ * Codex only accepts its native labels in the catalog. Provider-specific wire values (e.g. Z.AI
+ * `max`) are mapped at request time by src/reasoning-effort.ts, never advertised directly here.
  */
-const ROUTED_REASONING_LEVELS: { effort: string; description: string }[] = [
-  { effort: "low", description: "Fast responses with lighter reasoning" },
-  { effort: "medium", description: "Balances speed and reasoning depth" },
-  { effort: "high", description: "Greater reasoning depth for complex problems" },
-  { effort: "xhigh", description: "Extended reasoning for the hardest problems" },
-];
+const ROUTED_REASONING_LEVELS = CODEX_REASONING_LEVELS;
 
-function deriveEntry(template: RawEntry | null, slug: string, desc: string, priority: number): RawEntry {
+function applyCatalogModelMetadata(entry: RawEntry, model?: CatalogModel): void {
+  if (!model) return;
+  if (typeof model.contextWindow === "number" && model.contextWindow > 0) {
+    entry.context_window = model.contextWindow;
+    entry.max_context_window = model.contextWindow;
+    entry.auto_compact_token_limit = Math.floor(model.contextWindow * 0.9);
+  }
+  if (Array.isArray(model.inputModalities) && model.inputModalities.length > 0) {
+    entry.input_modalities = model.inputModalities;
+  }
+}
+
+function applyReasoningLevels(entry: RawEntry, effortsOverride?: string[]): void {
+  const efforts = sanitizeCodexReasoningEfforts(effortsOverride) ?? ROUTED_REASONING_LEVELS.map(l => l.effort);
+  const byEffort = new Map(
+    (Array.isArray(entry.supported_reasoning_levels) ? entry.supported_reasoning_levels : [])
+      .map((l: { effort?: string }) => [l.effort, l]),
+  );
+  entry.supported_reasoning_levels = efforts.map(effort => {
+    const native = byEffort.get(effort);
+    if (native) return native;
+    return ROUTED_REASONING_LEVELS.find(l => l.effort === effort) ?? { effort, description: `${effort} reasoning` };
+  });
+  if (efforts.length === 0) {
+    delete entry.default_reasoning_level;
+    return;
+  }
+  entry.default_reasoning_level = efforts.includes("medium") ? "medium" : efforts.includes("high") ? "high" : efforts[0];
+}
+
+function deriveEntry(template: RawEntry | null, slug: string, desc: string, priority: number, model?: CatalogModel): RawEntry {
   if (template) {
     const e = JSON.parse(JSON.stringify(template)) as RawEntry;
     e.slug = slug;
@@ -203,28 +227,24 @@ function deriveEntry(template: RawEntry | null, slug: string, desc: string, prio
           `You are a coding agent powered by the ${modelName} model, served through the opencodex proxy. Do not claim to be GPT-5 or made by OpenAI.`,
         );
       }
-      // Reuse the template's level objects where they exist (correct shape/fields), synthesize the rest.
-      const byEffort = new Map(
-        (Array.isArray(e.supported_reasoning_levels) ? e.supported_reasoning_levels : [])
-          .map((l: { effort?: string }) => [l.effort, l]),
-      );
-      e.supported_reasoning_levels = ROUTED_REASONING_LEVELS.map(l => byEffort.get(l.effort) ?? { ...l });
-      e.default_reasoning_level = "medium";
+      applyReasoningLevels(e, model?.reasoningEfforts);
       normalizeRoutedCatalogEntry(e);
       applyJawcodeCatalogMetadata(e, slug);
+      applyCatalogModelMetadata(e, model);
     }
     return ensureStrictCatalogFields(normalizeServiceTiers(e));
   }
   // Fallback when no template is available (best-effort; strict parser may need more).
   const entry: RawEntry = {
     slug, display_name: slug, description: desc,
-    default_reasoning_level: "medium",
-    supported_reasoning_levels: ROUTED_REASONING_LEVELS.map(l => ({ ...l })),
     shell_type: "shell_command", visibility: "list", supported_in_api: true,
     priority, base_instructions: "You are a helpful coding assistant.",
     ...(slug.includes("/") ? { web_search_tool_type: "text_and_image", supports_search_tool: true } : {}),
   };
+  if (slug.includes("/")) applyReasoningLevels(entry, model?.reasoningEfforts);
+  else applyReasoningLevels(entry);
   applyJawcodeCatalogMetadata(entry, slug);
+  applyCatalogModelMetadata(entry, model);
   return ensureStrictCatalogFields(normalizeServiceTiers(entry));
 }
 
@@ -247,7 +267,7 @@ export function buildCatalogEntries(template: RawEntry | null, gptSlugs: string[
   }
   for (const m of goModels) {
     const slug = `${m.provider}/${m.id}`;
-    const e = deriveEntry(template, slug, `Routed via opencodex → ${m.provider} (${m.owned_by ?? m.provider}).`, 5);
+    const e = deriveEntry(template, slug, `Routed via opencodex → ${m.provider} (${m.owned_by ?? m.provider}).`, 5, m);
     if (rank.has(slug)) e.priority = rank.get(slug)!;
     out.push(e);
   }
@@ -285,6 +305,61 @@ function readNativeBaseline(): Map<string, number> {
   return out;
 }
 
+
+type ProviderModelsApiItem = {
+  id: string;
+  owned_by?: string;
+  max_model_len?: number;
+  metadata?: {
+    capabilities?: Record<string, unknown>;
+    limits?: Record<string, unknown>;
+  };
+};
+
+function catalogHintsFromProviderConfig(name: string, prov: OcxProviderConfig, id: string): Partial<CatalogModel> {
+  void name;
+  const reasoningEfforts = configuredReasoningEfforts(prov, id);
+  return {
+    ...(reasoningEfforts !== undefined ? { reasoningEfforts } : {}),
+  };
+}
+
+function applyConfigHintsToCachedModels(name: string, prov: OcxProviderConfig, models: CatalogModel[]): CatalogModel[] {
+  return models.map(model => ({
+    ...catalogHintsFromProviderConfig(name, prov, model.id),
+    ...model,
+  }));
+}
+
+function isGlm52ModelId(id: string): boolean {
+  const normalized = id.toLowerCase();
+  return normalized === "glm-5.2" || normalized === "glm-5.2[1m]";
+}
+
+function catalogHintsFromModelsApiItem(providerName: string, item: ProviderModelsApiItem): Partial<CatalogModel> {
+  const capabilities = item.metadata?.capabilities;
+  const limits = item.metadata?.limits;
+  const contextWindow =
+    typeof limits?.max_context_length === "number" ? limits.max_context_length
+      : typeof item.max_model_len === "number" ? item.max_model_len
+        : undefined;
+  const reasoningEfforts = capabilities && typeof capabilities.reasoning_effort === "boolean"
+    ? (capabilities.reasoning_effort
+      ? ((providerName === "neuralwatt" || providerName === "zai") && isGlm52ModelId(item.id)
+        ? ["low", "medium", "high", "xhigh"]
+        : ["low", "medium", "high"])
+      : [])
+    : undefined;
+  const inputModalities = capabilities && typeof capabilities.vision === "boolean"
+    ? (capabilities.vision ? ["text", "image"] : ["text"])
+    : undefined;
+  return {
+    ...(contextWindow && contextWindow > 0 ? { contextWindow } : {}),
+    ...(reasoningEfforts !== undefined ? { reasoningEfforts } : {}),
+    ...(inputModalities ? { inputModalities } : {}),
+  };
+}
+
 /**
  * Fetch a provider's `/models` (openai-chat style) with a TTL cache + stale fallback. Skips
  * forward-auth providers. Fresh cache → no network; live fetch → cache the merged result;
@@ -296,21 +371,35 @@ async function fetchProviderModels(name: string, prov: OcxProviderConfig, ttlMs:
   const apiKey = await resolveModelsAuthToken(name, prov);
   if (prov.authMode === "oauth" && !apiKey) return []; // not logged in → skip
   const fresh = getFreshCached(name, ttlMs);
-  if (fresh) return fresh; // dedups Codex's frequent /v1/models polling within the TTL
-  const configured: CatalogModel[] = (prov.models ?? []).map(id => ({ id, provider: name }));
+  if (fresh) return applyConfigHintsToCachedModels(name, prov, fresh); // dedups Codex's frequent /v1/models polling within the TTL
+  const configured: CatalogModel[] = (prov.models ?? []).map(id => ({
+    id,
+    provider: name,
+    ...catalogHintsFromProviderConfig(name, prov, id),
+  }));
   const { url, headers } = buildModelsRequest(prov, apiKey);
   try {
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return getStaleCached(name) ?? configured;
-    const json = await res.json() as { data?: { id: string; owned_by?: string }[] };
-    const live = (json.data ?? []).map(m => ({ id: m.id, provider: name, owned_by: m.owned_by }));
+    if (!res.ok) {
+      const stale = getStaleCached(name);
+      return stale ? applyConfigHintsToCachedModels(name, prov, stale) : configured;
+    }
+    const json = await res.json() as { data?: ProviderModelsApiItem[] };
+    const live = (json.data ?? []).map(m => ({
+      id: m.id,
+      provider: name,
+      owned_by: m.owned_by,
+      ...catalogHintsFromProviderConfig(name, prov, m.id),
+      ...catalogHintsFromModelsApiItem(name, m),
+    }));
     const liveIds = new Set(live.map(m => m.id));
     // Merge explicit config additions (e.g. a model not in the provider's /models, like a new endpoint).
     const merged = [...live, ...configured.filter(m => !liveIds.has(m.id))];
     setCached(name, merged);
     return merged;
   } catch {
-    return getStaleCached(name) ?? configured;
+    const stale = getStaleCached(name);
+    return stale ? applyConfigHintsToCachedModels(name, prov, stale) : configured;
   }
 }
 
@@ -325,12 +414,12 @@ export async function gatherRoutedModels(config: OcxConfig): Promise<CatalogMode
   const lists = await Promise.all(
     Object.entries(config.providers).map(([name, prov]) => fetchProviderModels(name, prov, ttlMs)),
   );
-  const all = augmentRoutedModelsWithJawcodeMetadata(lists.flat(), Object.keys(config.providers));
+  const all = augmentRoutedModelsWithJawcodeMetadata(lists.flat(), Object.keys(config.providers), config.providers);
   all.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)));
   return all;
 }
 
-export function augmentRoutedModelsWithJawcodeMetadata(models: CatalogModel[], providerNames: string[]): CatalogModel[] {
+export function augmentRoutedModelsWithJawcodeMetadata(models: CatalogModel[], providerNames: string[], providers?: Record<string, OcxProviderConfig>): CatalogModel[] {
   const out = [...models];
   const seen = new Set(out.map(m => `${m.provider}/${m.id}`));
   for (const provider of providerNames) {
@@ -341,7 +430,7 @@ export function augmentRoutedModelsWithJawcodeMetadata(models: CatalogModel[], p
       const key = `${provider}/${meta.id}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ provider, id: meta.id, owned_by: provider });
+      out.push({ provider, id: meta.id, owned_by: provider, ...(providers?.[provider] ? catalogHintsFromProviderConfig(provider, providers[provider], meta.id) : {}) });
     }
   }
   return out;

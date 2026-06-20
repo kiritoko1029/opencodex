@@ -1,10 +1,11 @@
 import type { ProviderAdapter } from "./base";
 import { debugDroppedFrame } from "../debug";
-import type { AdapterEvent, OcxAssistantMessage, OcxContentPart, OcxMessage, OcxParsedRequest, OcxProviderConfig, OcxTextContent, OcxToolCall, OcxUsage } from "../types";
-import { namespacedToolName } from "../types";
+import type { AdapterEvent, OcxAssistantMessage, OcxContentPart, OcxMessage, OcxParsedRequest, OcxProviderConfig, OcxTextContent, OcxThinkingContent, OcxToolCall, OcxUsage } from "../types";
+import { modelInList, namespacedToolName } from "../types";
+import { mapReasoningEffort } from "../reasoning-effort";
 import { contentPartsToText } from "./image";
 
-function messagesToChatFormat(parsed: OcxParsedRequest): unknown[] {
+function messagesToChatFormat(parsed: OcxParsedRequest, provider: OcxProviderConfig): unknown[] {
   const out: unknown[] = [];
   const { context, options } = parsed;
   let pendingToolCallIds = new Set<string>();
@@ -46,10 +47,15 @@ function messagesToChatFormat(parsed: OcxParsedRequest): unknown[] {
       case "assistant": {
         const aMsg = msg as OcxAssistantMessage;
         const textParts = aMsg.content.filter(p => p.type === "text") as OcxTextContent[];
+        const thinkingParts = aMsg.content.filter(p => p.type === "thinking") as OcxThinkingContent[];
         const toolCalls = aMsg.content.filter(p => p.type === "toolCall") as OcxToolCall[];
         const chatMsg: Record<string, unknown> = { role: "assistant" };
         if (textParts.length > 0) {
           chatMsg.content = textParts.map(p => p.text).join("");
+        }
+        const reasoningContent = thinkingParts.map(p => p.thinking).join("");
+        if (reasoningContent.length > 0 && modelInList(provider.preserveReasoningContentModels, parsed.modelId)) {
+          chatMsg.reasoning_content = reasoningContent;
         }
         if (toolCalls.length > 0) {
           chatMsg.tool_calls = toolCalls.map(tc => ({
@@ -59,9 +65,12 @@ function messagesToChatFormat(parsed: OcxParsedRequest): unknown[] {
           }));
           if (!chatMsg.content) chatMsg.content = null;
         }
-        // Skip empty assistant messages (e.g. reasoning-only history items): chat APIs
-        // like DeepSeek reject an assistant message with neither content nor tool_calls.
-        if (chatMsg.content === undefined && chatMsg.tool_calls === undefined) break;
+        if (chatMsg.reasoning_content !== undefined && chatMsg.content === undefined && chatMsg.tool_calls === undefined) {
+          chatMsg.content = "";
+        }
+        // Skip empty assistant messages: chat APIs like DeepSeek reject an assistant message
+        // with neither content, tool calls, nor a provider-supported reasoning_content field.
+        if (chatMsg.content === undefined && chatMsg.tool_calls === undefined && chatMsg.reasoning_content === undefined) break;
         out.push(chatMsg);
         pendingToolCallIds = new Set(toolCalls.map(tc => tc.id).filter(Boolean));
         break;
@@ -141,7 +150,7 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
     name: "openai-chat",
 
     buildRequest(parsed: OcxParsedRequest) {
-      const messages = messagesToChatFormat(parsed);
+      const messages = messagesToChatFormat(parsed, provider);
       const tools = toolsToChatFormat(parsed);
       const toolChoice = toolChoiceToChatFormat(parsed.options.toolChoice);
 
@@ -151,22 +160,27 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
         stream: parsed.stream,
       };
       if (tools) body.tools = tools;
-      if (toolChoice !== undefined) body.tool_choice = toolChoice;
-      if (parsed.options.maxOutputTokens !== undefined) body.max_tokens = parsed.options.maxOutputTokens;
-      if (parsed.options.temperature !== undefined) body.temperature = parsed.options.temperature;
-      if (parsed.options.topP !== undefined) body.top_p = parsed.options.topP;
-      if (parsed.options.stopSequences !== undefined) body.stop = parsed.options.stopSequences;
-      // Some models reject a reasoning/thinking param entirely (e.g. xAI grok-build-0.1,
-      // grok-composer-2.5-fast). Drop reasoning_effort for them even if Codex selected an effort.
-      if (parsed.options.reasoning !== undefined && !provider.noReasoningModels?.includes(parsed.modelId)) {
-        // Forward the reasoning ladder (low/medium/high/xhigh) as-is. "minimal" (Codex-native lowest,
-        // widely unsupported downstream) maps to "low"; "max" isn't a real tier (no longer advertised)
-        // so it folds to "xhigh".
-        const r = parsed.options.reasoning;
-        body.reasoning_effort = r === "minimal" ? "low" : r === "max" ? "xhigh" : r;
+      if (toolChoice !== undefined) {
+        body.tool_choice = modelInList(provider.autoToolChoiceOnlyModels, parsed.modelId)
+          ? (toolChoice === "none" ? "none" : "auto")
+          : toolChoice;
       }
-      if (parsed.options.presencePenalty !== undefined) body.presence_penalty = parsed.options.presencePenalty;
-      if (parsed.options.frequencyPenalty !== undefined) body.frequency_penalty = parsed.options.frequencyPenalty;
+      if (parsed.options.maxOutputTokens !== undefined) body.max_tokens = parsed.options.maxOutputTokens;
+      if (parsed.options.temperature !== undefined && !modelInList(provider.noTemperatureModels, parsed.modelId)) {
+        body.temperature = parsed.options.temperature;
+      }
+      if (parsed.options.topP !== undefined && !modelInList(provider.noTopPModels, parsed.modelId)) {
+        body.top_p = parsed.options.topP;
+      }
+      if (parsed.options.stopSequences !== undefined) body.stop = parsed.options.stopSequences;
+      const reasoningEffort = mapReasoningEffort(provider, parsed.modelId, parsed.options.reasoning);
+      if (reasoningEffort !== undefined) body.reasoning_effort = reasoningEffort;
+      if (parsed.options.presencePenalty !== undefined && !modelInList(provider.noPenaltyModels, parsed.modelId)) {
+        body.presence_penalty = parsed.options.presencePenalty;
+      }
+      if (parsed.options.frequencyPenalty !== undefined && !modelInList(provider.noPenaltyModels, parsed.modelId)) {
+        body.frequency_penalty = parsed.options.frequencyPenalty;
+      }
 
       if (parsed.stream) {
         body.stream_options = { include_usage: true };

@@ -20,8 +20,17 @@ export interface KeyLoginProvider {
    * accept a reasoning param. Copied into the created provider config by `enrichProviderFromCatalog`,
    * so the classification actually gates the sidecars (matching is tolerant of an Ollama ":size" tag).
    */
+  reasoningEfforts?: string[];
+  modelReasoningEfforts?: Record<string, string[]>;
+  reasoningEffortMap?: Record<string, string>;
+  modelReasoningEffortMap?: Record<string, Record<string, string>>;
   noVisionModels?: string[];
   noReasoningModels?: string[];
+  noTemperatureModels?: string[];
+  noTopPModels?: string[];
+  noPenaltyModels?: string[];
+  autoToolChoiceOnlyModels?: string[];
+  preserveReasoningContentModels?: string[];
 }
 
 export const KEY_LOGIN_PROVIDERS: Record<string, KeyLoginProvider> = deriveKeyLoginMap();
@@ -37,8 +46,26 @@ export function enrichProviderFromCatalog(name: string, prov: OcxProviderConfig)
   if (!e) return;
   if (!prov.models && e.models) prov.models = [...e.models];
   if (!prov.defaultModel && e.defaultModel) prov.defaultModel = e.defaultModel;
+  if (!prov.reasoningEfforts && e.reasoningEfforts) prov.reasoningEfforts = [...e.reasoningEfforts];
+  if (!prov.modelReasoningEfforts && e.modelReasoningEfforts) prov.modelReasoningEfforts = cloneRecordOfArrays(e.modelReasoningEfforts);
+  if (!prov.reasoningEffortMap && e.reasoningEffortMap) prov.reasoningEffortMap = { ...e.reasoningEffortMap };
+  if (!prov.modelReasoningEffortMap && e.modelReasoningEffortMap) prov.modelReasoningEffortMap = cloneNestedRecord(e.modelReasoningEffortMap);
   if (!prov.noVisionModels && e.noVisionModels) prov.noVisionModels = [...e.noVisionModels];
   if (!prov.noReasoningModels && e.noReasoningModels) prov.noReasoningModels = [...e.noReasoningModels];
+  if (!prov.noTemperatureModels && e.noTemperatureModels) prov.noTemperatureModels = [...e.noTemperatureModels];
+  if (!prov.noTopPModels && e.noTopPModels) prov.noTopPModels = [...e.noTopPModels];
+  if (!prov.noPenaltyModels && e.noPenaltyModels) prov.noPenaltyModels = [...e.noPenaltyModels];
+  if (!prov.autoToolChoiceOnlyModels && e.autoToolChoiceOnlyModels) prov.autoToolChoiceOnlyModels = [...e.autoToolChoiceOnlyModels];
+  if (!prov.preserveReasoningContentModels && e.preserveReasoningContentModels) prov.preserveReasoningContentModels = [...e.preserveReasoningContentModels];
+}
+
+
+function cloneRecordOfArrays(input: Record<string, string[]>): Record<string, string[]> {
+  return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, [...value]]));
+}
+
+function cloneNestedRecord(input: Record<string, Record<string, string>>): Record<string, Record<string, string>> {
+  return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, { ...value }]));
 }
 
 export function isKeyLoginProvider(name: string): boolean {

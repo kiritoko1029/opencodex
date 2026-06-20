@@ -14,8 +14,17 @@ export interface ProviderRegistryEntry {
   dashboardUrl?: string;
   defaultModel?: string;
   models?: string[];
+  reasoningEfforts?: string[];
+  modelReasoningEfforts?: Record<string, string[]>;
+  reasoningEffortMap?: Record<string, string>;
+  modelReasoningEffortMap?: Record<string, Record<string, string>>;
   noVisionModels?: string[];
   noReasoningModels?: string[];
+  noTemperatureModels?: string[];
+  noTopPModels?: string[];
+  noPenaltyModels?: string[];
+  autoToolChoiceOnlyModels?: string[];
+  preserveReasoningContentModels?: string[];
   oauthId?: string;
   jawcodeBundle?: string;
   extraMetadataAliases?: string[];
@@ -24,8 +33,31 @@ export interface ProviderRegistryEntry {
 
 export type ProviderConfigSeed = Pick<
   OcxProviderConfig,
-  "adapter" | "baseUrl" | "authMode" | "defaultModel" | "models" | "noVisionModels" | "noReasoningModels"
+  "adapter" | "baseUrl" | "authMode" | "defaultModel" | "models"
+  | "reasoningEfforts" | "modelReasoningEfforts" | "reasoningEffortMap" | "modelReasoningEffortMap"
+  | "noVisionModels" | "noReasoningModels" | "noTemperatureModels" | "noTopPModels" | "noPenaltyModels"
+  | "autoToolChoiceOnlyModels" | "preserveReasoningContentModels"
 >;
+
+
+const ZAI_GLM_52_MODELS = ["glm-5.2", "glm-5.2[1m]"];
+const ZAI_GLM_52_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"];
+const ZAI_GLM_52_REASONING_MAP: Record<string, string> = {
+  none: "none",
+  minimal: "none",
+  low: "high",
+  medium: "high",
+  high: "high",
+  xhigh: "max",
+  max: "max",
+};
+const KIMI_THINKING_MODELS = ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5", "kimi-k2-0905-preview"];
+const KIMI_LOCKED_PARAMETER_MODELS = ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"];
+const NEURALWATT_REASONING_HISTORY_MODELS = [
+  "glm-5.2",
+  "moonshotai/Kimi-K2.5", "kimi-k2.6", "kimi-k2.7-code",
+  "qwen3.5-397b", "qwen3.6-35b",
+];
 
 export const PROVIDER_REGISTRY: readonly ProviderRegistryEntry[] = [
   {
@@ -75,11 +107,72 @@ export const PROVIDER_REGISTRY: readonly ProviderRegistryEntry[] = [
     oauthId: "kimi",
     jawcodeBundle: "moonshot",
     note: "Log in with your Kimi account",
-    models: ["kimi-k2.6", "kimi-k2.5"],
-    defaultModel: "kimi-k2.6",
+    models: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"],
+    defaultModel: "kimi-k2.7-code",
+    // Kimi thinking is controlled by Kimi's `thinking` extension, not OpenAI `reasoning_effort`.
+    noReasoningModels: KIMI_THINKING_MODELS,
+    modelReasoningEfforts: Object.fromEntries(KIMI_THINKING_MODELS.map(id => [id, []])),
+    noTemperatureModels: KIMI_LOCKED_PARAMETER_MODELS,
+    noTopPModels: KIMI_LOCKED_PARAMETER_MODELS,
+    noPenaltyModels: KIMI_LOCKED_PARAMETER_MODELS,
+    autoToolChoiceOnlyModels: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
+    preserveReasoningContentModels: KIMI_THINKING_MODELS,
   },
   { id: "openai-apikey", label: "OpenAI (API key)", adapter: "openai-responses", baseUrl: "https://api.openai.com/v1", authKind: "key", featured: true, dashboardUrl: "https://platform.openai.com/api-keys", defaultModel: "gpt-5.5" },
-  { id: "opencode-go", label: "opencode go", adapter: "openai-chat", baseUrl: "https://opencode.ai/zen/go/v1", authKind: "key", featured: true, dashboardUrl: "https://opencode.ai/auth", defaultModel: "kimi-k2.6", jawcodeBundle: "opencode-go", note: "GLM, DeepSeek, Kimi, Qwen, MiMo…" },
+  {
+    id: "opencode-go", label: "opencode go", adapter: "openai-chat", baseUrl: "https://opencode.ai/zen/go/v1",
+    authKind: "key", featured: true, dashboardUrl: "https://opencode.ai/auth", defaultModel: "kimi-k2.7-code",
+    jawcodeBundle: "opencode-go", note: "GLM, DeepSeek, Kimi, Qwen, MiMo…",
+    modelReasoningEfforts: {
+      "glm-5.2": ZAI_GLM_52_REASONING_EFFORTS,
+      "kimi-k2.7-code": [],
+      "kimi-k2.7-code-highspeed": [],
+    },
+    modelReasoningEffortMap: { "glm-5.2": ZAI_GLM_52_REASONING_MAP },
+    noReasoningModels: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
+    noTemperatureModels: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
+    noTopPModels: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
+    noPenaltyModels: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
+    autoToolChoiceOnlyModels: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
+    preserveReasoningContentModels: ["glm-5.2", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
+  },
+  {
+    id: "neuralwatt",
+    label: "Neuralwatt Cloud",
+    adapter: "openai-chat",
+    baseUrl: "https://api.neuralwatt.com/v1",
+    authKind: "key",
+    dashboardUrl: "https://portal.neuralwatt.com",
+    defaultModel: "glm-5.2",
+    models: [
+      "glm-5.2", "glm-5.2-fast",
+      "moonshotai/Kimi-K2.5", "kimi-k2.5-fast", "kimi-k2.6", "kimi-k2.6-fast",
+      "kimi-k2.7-code",
+      "qwen3.5-397b", "qwen3.5-397b-fast", "qwen3.6-35b", "qwen3.6-35b-fast",
+    ],
+    // Neuralwatt's /v1/models metadata is authoritative; these static hints are the offline fallback.
+    modelReasoningEfforts: {
+      "glm-5.2": ZAI_GLM_52_REASONING_EFFORTS,
+      "glm-5.2-fast": [],
+      "moonshotai/Kimi-K2.5": [],
+      "kimi-k2.5-fast": [],
+      "kimi-k2.6": [],
+      "kimi-k2.6-fast": [],
+      "kimi-k2.7-code": [],
+      "qwen3.5-397b": ["low", "medium", "high"],
+      "qwen3.5-397b-fast": [],
+      "qwen3.6-35b": ["low", "medium", "high"],
+      "qwen3.6-35b-fast": [],
+    },
+    modelReasoningEffortMap: { "glm-5.2": ZAI_GLM_52_REASONING_MAP },
+    noReasoningModels: ["glm-5.2-fast", "kimi-k2.5-fast", "kimi-k2.6-fast", "qwen3.5-397b-fast", "qwen3.6-35b-fast"],
+    noVisionModels: ["glm-5.2", "glm-5.2-fast", "qwen3.5-397b", "qwen3.5-397b-fast"],
+    noTemperatureModels: ["kimi-k2.7-code"],
+    noTopPModels: ["kimi-k2.7-code"],
+    noPenaltyModels: ["kimi-k2.7-code"],
+    autoToolChoiceOnlyModels: ["kimi-k2.7-code"],
+    preserveReasoningContentModels: NEURALWATT_REASONING_HISTORY_MODELS,
+  },
   { id: "openrouter", label: "OpenRouter", adapter: "openai-chat", baseUrl: "https://openrouter.ai/api/v1", authKind: "key", featured: true, dashboardUrl: "https://openrouter.ai/keys", jawcodeBundle: "openrouter" },
   { id: "groq", label: "Groq", adapter: "openai-chat", baseUrl: "https://api.groq.com/openai/v1", authKind: "key", featured: true, dashboardUrl: "https://console.groq.com/keys" },
   { id: "google", label: "Google Gemini", adapter: "google", baseUrl: "https://generativelanguage.googleapis.com", authKind: "key", featured: true, dashboardUrl: "https://aistudio.google.com/apikey", defaultModel: "gemini-3-pro", jawcodeBundle: "google", extraMetadataAliases: ["gemini"] },
@@ -92,11 +185,30 @@ export const PROVIDER_REGISTRY: readonly ProviderRegistryEntry[] = [
   { id: "together", label: "Together", baseUrl: "https://api.together.xyz/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://api.together.xyz/settings/api-keys" },
   { id: "fireworks", label: "Fireworks", baseUrl: "https://api.fireworks.ai/inference/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://fireworks.ai/account/api-keys" },
   { id: "firepass", label: "Fire Pass (Fireworks Kimi)", baseUrl: "https://api.fireworks.ai/inference/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://fireworks.ai/account/api-keys" },
-  { id: "moonshot", label: "Moonshot (Kimi API)", baseUrl: "https://api.moonshot.ai/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://platform.moonshot.ai/console/api-keys", defaultModel: "kimi-k2-0905-preview", jawcodeBundle: "moonshot" },
+  {
+    id: "moonshot", label: "Moonshot (Kimi API)", baseUrl: "https://api.moonshot.ai/v1", adapter: "openai-chat", authKind: "key",
+    dashboardUrl: "https://platform.moonshot.ai/console/api-keys", defaultModel: "kimi-k2.7-code", jawcodeBundle: "moonshot",
+    models: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5", "kimi-k2-0905-preview"],
+    noReasoningModels: KIMI_THINKING_MODELS,
+    modelReasoningEfforts: Object.fromEntries(KIMI_THINKING_MODELS.map(id => [id, []])),
+    noTemperatureModels: KIMI_LOCKED_PARAMETER_MODELS,
+    noTopPModels: KIMI_LOCKED_PARAMETER_MODELS,
+    noPenaltyModels: KIMI_LOCKED_PARAMETER_MODELS,
+    autoToolChoiceOnlyModels: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
+    preserveReasoningContentModels: KIMI_THINKING_MODELS,
+  },
   { id: "huggingface", label: "Hugging Face", baseUrl: "https://router.huggingface.co/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://huggingface.co/settings/tokens" },
   { id: "nvidia", label: "NVIDIA NIM", baseUrl: "https://integrate.api.nvidia.com/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://build.nvidia.com" },
   { id: "venice", label: "Venice", baseUrl: "https://api.venice.ai/api/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://venice.ai/settings/api" },
-  { id: "zai", label: "Z.AI (GLM Coding)", baseUrl: "https://api.z.ai/api/coding/paas/v4", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://z.ai/manage-apikey/apikey-list", defaultModel: "glm-4.6" },
+  {
+    id: "zai", label: "Z.AI (GLM Coding)", baseUrl: "https://api.z.ai/api/coding/paas/v4", adapter: "openai-chat", authKind: "key",
+    dashboardUrl: "https://z.ai/manage-apikey/apikey-list", defaultModel: "glm-5.2",
+    models: ["glm-5.2", "glm-5.2[1m]", "glm-5.1", "glm-5", "glm-4.6"],
+    noVisionModels: ZAI_GLM_52_MODELS,
+    modelReasoningEfforts: Object.fromEntries(ZAI_GLM_52_MODELS.map(id => [id, ZAI_GLM_52_REASONING_EFFORTS])),
+    modelReasoningEffortMap: Object.fromEntries(ZAI_GLM_52_MODELS.map(id => [id, ZAI_GLM_52_REASONING_MAP])),
+    preserveReasoningContentModels: ZAI_GLM_52_MODELS,
+  },
   { id: "nanogpt", label: "NanoGPT", baseUrl: "https://nano-gpt.com/api/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://nano-gpt.com/api" },
   { id: "synthetic", label: "Synthetic", baseUrl: "https://api.synthetic.new/openai/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://synthetic.new" },
   { id: "qwen-portal", label: "Qwen Portal", baseUrl: "https://portal.qwen.ai/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://portal.qwen.ai" },
@@ -125,7 +237,18 @@ export const PROVIDER_REGISTRY: readonly ProviderRegistryEntry[] = [
   { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://console.mistral.ai/api-keys", defaultModel: "codestral-latest" },
   { id: "minimax", label: "MiniMax", baseUrl: "https://api.minimax.io/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://platform.minimax.io", defaultModel: "MiniMax-M2.5", jawcodeBundle: "minimax", metadataModelIdNormalize: "case-insensitive" },
   { id: "minimax-cn", label: "MiniMax (CN)", baseUrl: "https://api.minimaxi.com/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://platform.minimaxi.com", defaultModel: "MiniMax-M2.5", jawcodeBundle: "minimax", metadataModelIdNormalize: "case-insensitive" },
-  { id: "kimi-code", label: "Kimi (coding)", baseUrl: "https://api.kimi.com/coding/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://platform.moonshot.cn/console/api-keys", defaultModel: "kimi-k2.5" },
+  {
+    id: "kimi-code", label: "Kimi (coding)", baseUrl: "https://api.kimi.com/coding/v1", adapter: "openai-chat", authKind: "key",
+    dashboardUrl: "https://platform.moonshot.cn/console/api-keys", defaultModel: "kimi-k2.7-code",
+    models: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"],
+    noReasoningModels: KIMI_THINKING_MODELS,
+    modelReasoningEfforts: Object.fromEntries(KIMI_THINKING_MODELS.map(id => [id, []])),
+    noTemperatureModels: KIMI_LOCKED_PARAMETER_MODELS,
+    noTopPModels: KIMI_LOCKED_PARAMETER_MODELS,
+    noPenaltyModels: KIMI_LOCKED_PARAMETER_MODELS,
+    autoToolChoiceOnlyModels: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
+    preserveReasoningContentModels: KIMI_THINKING_MODELS,
+  },
   { id: "opencode-zen", label: "opencode zen", baseUrl: "https://opencode.ai/zen/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://opencode.ai/auth" },
   { id: "vercel-ai-gateway", label: "Vercel AI Gateway", baseUrl: "https://ai-gateway.vercel.sh/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://vercel.com/dashboard" },
   { id: "xiaomi", label: "Xiaomi MiMo", baseUrl: "https://api.xiaomimimo.com/anthropic", adapter: "anthropic", authKind: "key", dashboardUrl: "https://xiaomimimo.com", defaultModel: "mimo-v2.5-pro" },
