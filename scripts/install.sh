@@ -14,7 +14,7 @@ BUN_VER=$(bun --version)
 echo "Using Bun v$BUN_VER"
 
 # Install opencodex globally
-bun add -g @bitkyc08/opencodex
+bun install -g @bitkyc08/opencodex
 
 echo ""
 echo "✅ opencodex installed! Run 'ocx init' to set up."

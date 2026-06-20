@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * postinstall — one-time GitHub-star prompt during `npm install -g opencx`.
+ * postinstall — one-time GitHub-star prompt during `npm install -g @bitkyc08/opencodex`.
  *
  * Behavior:
  *   - TTY-only (skips CI / piped installs)

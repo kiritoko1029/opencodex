@@ -14,7 +14,7 @@ $bunVer = & bun --version
 Write-Host "Using Bun v$bunVer"
 
 # Install opencodex globally
-& bun add -g @bitkyc08/opencodex
+& bun install -g @bitkyc08/opencodex
 
 Write-Host ""
 Write-Host "opencodex installed! Run 'ocx init' to set up." -ForegroundColor Green

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "opencx",
+      "name": "@bitkyc08/opencodex",
       "dependencies": {
         "zod": "^4.0.0",
       },
