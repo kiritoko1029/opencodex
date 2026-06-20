@@ -250,6 +250,11 @@ select.input { appearance: none; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .modal-head h3 { font-size: 16px; }
 
+.setup-guide { font-size: 13px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; margin-bottom: 4px; }
+.setup-guide summary { cursor: pointer; color: var(--accent-hover); font-weight: 500; }
+.setup-guide summary:hover { text-decoration: underline; }
+.setup-guide a { color: var(--accent-hover); }
+
 /* clickable list rows (preset picker, provider cards) */
 .list-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 11px 13px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--raised); cursor: pointer; color: var(--text); font: inherit; transition: background 0.12s, border-color 0.12s; }
 .list-row:hover { background: var(--raised-hover); border-color: var(--accent-ring); }

@@ -227,11 +227,29 @@ export default function AddProviderModal({
           ) : (
             // API key / Codex-forward form
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {isCustom && <Field label="Provider name"><input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. openrouter" /></Field>}
+              {!isCustom && preset.note && (
+                <details className="setup-guide">
+                  <summary>Setup guide</summary>
+                  <ol style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12, color: "var(--muted)", lineHeight: 1.7 }}>
+                    <li>Go to <a href={preset.dashboardUrl} target="_blank" rel="noreferrer">{preset.label} dashboard</a> and copy your API key</li>
+                    <li>Paste it in the API key field below</li>
+                    <li>Click Add provider — models are auto-discovered</li>
+                  </ol>
+                  {preset.note && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6, fontStyle: "italic" }}>{preset.note}</div>}
+                </details>
+              )}
+              <Field label="Provider name">
+                <input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. openrouter" />
+              </Field>
               {dup && <div style={{ fontSize: 12, color: "var(--amber)" }}>Provider "{form.name.trim()}" exists and will be overwritten.</div>}
-              {!isCustom && preset.note && <div className="muted" style={{ fontSize: 13, marginBottom: 2 }}>{preset.note}</div>}
-              {isCustom && <Field label="Adapter"><select className="input" value={form.adapter} onChange={e => setForm({ ...form, adapter: e.target.value })}>{["openai-responses", "openai-chat", "anthropic", "google", "azure-openai"].map(a => <option key={a} value={a}>{a}</option>)}</select></Field>}
-              {isCustom && <Field label="Base URL"><input className="input" value={form.baseUrl} onChange={e => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://..." /></Field>}
+              <Field label="Adapter">
+                <select className="input" value={form.adapter} onChange={e => setForm({ ...form, adapter: e.target.value })}>
+                  {["openai-responses", "openai-chat", "anthropic", "google", "azure-openai"].map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </Field>
+              <Field label="Base URL">
+                <input className="input" value={form.baseUrl} onChange={e => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://..." />
+              </Field>
               {form.authMode === "forward" ? (
                 <div style={{ fontSize: 12, color: "var(--green)", background: "var(--green-soft)", border: "1px solid var(--green)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>
                   No key needed — the proxy forwards your <code className="chip">codex login</code> credentials to this provider.
