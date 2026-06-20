@@ -166,6 +166,7 @@ export default function AddProviderModal({
   };
 
   const dup = form ? existingNames.includes(form.name.trim()) && form.name.trim() !== "" : false;
+  const isCustom = preset?.id === "custom";
 
   return (
     <div role="dialog" aria-modal="true" aria-label="Add provider" className="modal-overlay" onClick={onClose}>
@@ -203,7 +204,7 @@ export default function AddProviderModal({
           </>
         ) : form && (
           preset.auth === "oauth" && form.authMode === "oauth" ? (
-            // ── Real OAuth login pane ──
+            // OAuth login pane
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <div className="muted" style={{ fontSize: 13 }}>{preset.note ?? "Log in with your account — no API key needed."}</div>
               {oauthSupported.includes(preset.oauthProvider ?? "") ? (
@@ -224,20 +225,13 @@ export default function AddProviderModal({
               </div>
             </div>
           ) : (
-            // ── API key / Codex-forward form ──
+            // API key / Codex-forward form
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <Field label="Provider name">
-                <input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. openrouter" />
-              </Field>
-              {dup && <div style={{ fontSize: 12, color: "var(--amber)" }}>A provider named “{form.name.trim()}” exists — it will be overwritten.</div>}
-              <Field label="Adapter">
-                <select className="input" value={form.adapter} onChange={e => setForm({ ...form, adapter: e.target.value })}>
-                  {["openai-responses", "openai-chat", "anthropic", "google", "azure-openai"].map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
-              </Field>
-              <Field label="Base URL">
-                <input className="input" value={form.baseUrl} onChange={e => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://…" />
-              </Field>
+              {isCustom && <Field label="Provider name"><input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. openrouter" /></Field>}
+              {dup && <div style={{ fontSize: 12, color: "var(--amber)" }}>Provider "{form.name.trim()}" exists and will be overwritten.</div>}
+              {!isCustom && preset.note && <div className="muted" style={{ fontSize: 13, marginBottom: 2 }}>{preset.note}</div>}
+              {isCustom && <Field label="Adapter"><select className="input" value={form.adapter} onChange={e => setForm({ ...form, adapter: e.target.value })}>{["openai-responses", "openai-chat", "anthropic", "google", "azure-openai"].map(a => <option key={a} value={a}>{a}</option>)}</select></Field>}
+              {isCustom && <Field label="Base URL"><input className="input" value={form.baseUrl} onChange={e => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://..." /></Field>}
               {form.authMode === "forward" ? (
                 <div style={{ fontSize: 12, color: "var(--green)", background: "var(--green-soft)", border: "1px solid var(--green)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>
                   No key needed — the proxy forwards your <code className="chip">codex login</code> credentials to this provider.

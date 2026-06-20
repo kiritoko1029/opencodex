@@ -201,8 +201,9 @@ export const PROVIDER_REGISTRY: readonly ProviderRegistryEntry[] = [
   { id: "nvidia", label: "NVIDIA NIM", baseUrl: "https://integrate.api.nvidia.com/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://build.nvidia.com" },
   { id: "venice", label: "Venice", baseUrl: "https://api.venice.ai/api/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://venice.ai/settings/api" },
   {
-    id: "zai", label: "Z.AI (GLM Coding)", baseUrl: "https://api.z.ai/api/coding/paas/v4", adapter: "openai-chat", authKind: "key",
+    id: "zai", label: "Z.AI — GLM Coding Plan", baseUrl: "https://api.z.ai/api/coding/paas/v4", adapter: "openai-chat", authKind: "key",
     dashboardUrl: "https://z.ai/manage-apikey/apikey-list", defaultModel: "glm-5.2",
+    note: "GLM-5.2 coding subscription",
     models: ["glm-5.2", "glm-5.2[1m]", "glm-5.1", "glm-5", "glm-4.6"],
     noVisionModels: ZAI_GLM_52_MODELS,
     modelReasoningEfforts: Object.fromEntries(ZAI_GLM_52_MODELS.map(id => [id, ZAI_GLM_52_REASONING_EFFORTS])),
@@ -235,8 +236,8 @@ export const PROVIDER_REGISTRY: readonly ProviderRegistryEntry[] = [
     ],
   },
   { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://console.mistral.ai/api-keys", defaultModel: "codestral-latest" },
-  { id: "minimax", label: "MiniMax", baseUrl: "https://api.minimax.io/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://platform.minimax.io", defaultModel: "MiniMax-M2.5", jawcodeBundle: "minimax", metadataModelIdNormalize: "case-insensitive" },
-  { id: "minimax-cn", label: "MiniMax (CN)", baseUrl: "https://api.minimaxi.com/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://platform.minimaxi.com", defaultModel: "MiniMax-M2.5", jawcodeBundle: "minimax", metadataModelIdNormalize: "case-insensitive" },
+  { id: "minimax", label: "MiniMax — Coding Plan", baseUrl: "https://api.minimax.io/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://platform.minimax.io", defaultModel: "MiniMax-M2.5", jawcodeBundle: "minimax", metadataModelIdNormalize: "case-insensitive", note: "Subscription Key or API Key" },
+  { id: "minimax-cn", label: "MiniMax — Coding Plan (CN)", baseUrl: "https://api.minimaxi.com/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://platform.minimaxi.com", defaultModel: "MiniMax-M2.5", jawcodeBundle: "minimax", metadataModelIdNormalize: "case-insensitive", note: "中国区 Subscription Key" },
   {
     id: "kimi-code", label: "Kimi (coding)", baseUrl: "https://api.kimi.com/coding/v1", adapter: "openai-chat", authKind: "key",
     dashboardUrl: "https://platform.moonshot.cn/console/api-keys", defaultModel: "kimi-k2.7-code",
