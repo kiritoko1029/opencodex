@@ -76,8 +76,10 @@ generation so both SSE and WS share one emitter (no logic fork).
 
 ## Capability-flag rollout (the 110 guard, operationalized)
 
-`codex-catalog.ts:78` deletes `supports_websockets` from every entry. The flag stays deleted
-until A's endpoint is live and tested, then is advertised **selectively**:
+Today the served catalog advertises WS on no entry (verified, `00_overview.md`): routed is
+stripped at `codex-catalog.ts:78`; native inherits none from the current template but *could*
+leak it from a future template (no native strip). The rollout must therefore control **both**
+paths — advertise intentionally when ready, and never let native leak it early. Sequence:
 
 1. A shipped (`10_`) + verified (`13_`) → advertise `supports_websockets = true` for routed +
    native (A serves both). Done in `12_`.
