@@ -58,7 +58,7 @@ export function saveConfig(config: OcxConfig): void {
 }
 
 export function websocketsEnabled(config: Pick<OcxConfig, "websockets">): boolean {
-  return config.websockets === true;
+  return config.websockets !== false;
 }
 
 export function getDefaultConfig(): OcxConfig {
@@ -76,7 +76,7 @@ export function getDefaultConfig(): OcxConfig {
     },
     defaultProvider: "openai",
     subagentModels: [...DEFAULT_SUBAGENT_MODELS],
-    websockets: false,
+    websockets: true,
   };
 }
 

@@ -175,7 +175,7 @@ export interface OcxConfig {
   subagentModels?: string[];
   /** Routed model ids ("<provider>/<model>") hidden from Codex (excluded from the catalog + /v1/models). */
   disabledModels?: string[];
-  /** Advertise supports_websockets so Codex opens the WS endpoint. Default false; set true to opt into WS. */
+  /** Advertise supports_websockets so Codex opens the WS endpoint. Default true; set false to force HTTPS/SSE. */
   websockets?: boolean;
   /** Freshness window (ms) for the per-provider live `/models` cache. Defaults to 5 min. */
   modelCacheTtlMs?: number;

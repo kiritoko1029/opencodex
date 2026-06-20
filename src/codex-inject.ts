@@ -14,7 +14,7 @@ const OCX_SECTION_MARKER = "# Auto-injected by opencodex";
  * whatever `[table]` happened to be open last (e.g. `[plugins."chrome@openai-bundled"]`), so Codex
  * never saw a global model_provider and silently fell back to the `openai` (ChatGPT) provider.
  */
-export function buildProviderTableBlock(port: number, supportsWebsockets = false): string {
+export function buildProviderTableBlock(port: number, supportsWebsockets = true): string {
   const lines = [
     "",
     OCX_SECTION_MARKER,

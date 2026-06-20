@@ -206,7 +206,7 @@ function deriveEntry(template: RawEntry | null, slug: string, desc: string, prio
  * catalog sync and the proxy `/v1/models?client_version` branch.
  * Native gpt slugs stay bare; routed models are namespaced `<provider>/<model>`.
  */
-export function buildCatalogEntries(template: RawEntry | null, gptSlugs: string[], goModels: CatalogModel[], featured?: string[], wsEnabled = false): RawEntry[] {
+export function buildCatalogEntries(template: RawEntry | null, gptSlugs: string[], goModels: CatalogModel[], featured?: string[], wsEnabled = true): RawEntry[] {
   // Codex's models-manager sorts by `priority` ASC and advertises the first 5 picker-visible
   // models to spawn_agent (sort_by_key(priority) + MAX_MODEL_OVERRIDES_IN_SPAWN_AGENT=5). Catalog
   // ARRAY order is discarded — so "featuring" a model = giving it the LOWEST priority (0..N-1) so
