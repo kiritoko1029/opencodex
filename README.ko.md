@@ -1,22 +1,13 @@
-<div align="center">
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
-  <img alt="opencodex" src="assets/logo-light.png" width="96" height="96">
-</picture>
-
-# opencodex (`ocx`)
-
-**[OpenAI Codex](https://openai.com/codex)를 위한 범용 프로바이더 proxy — Codex CLI, App, SDK에서 어떤 LLM이든 사용하세요.**
-
-[English](README.md) · **한국어** · [简体中文](README.zh-CN.md)
-
-📖 **[전체 문서 →](https://lidge-jun.github.io/opencodex/ko/)**
-
-</div>
+<p align="center">
+  <img src="assets/banner.png" alt="opencodex — 어떤 LLM이든 Codex에서 사용" width="820">
+</p>
 
 <p align="center">
-  <img src="assets/dashboard.png" alt="opencodex 대시보드 — 프록시 상태·프로바이더·모델을 보여주는 다크 컨트롤 패널" width="820">
+  <a href="README.md">English</a> · <b>한국어</b> · <a href="README.zh-CN.md">简体中文</a> · 📖 <a href="https://lidge-jun.github.io/opencodex/ko/"><b>전체 문서 →</b></a>
+</p>
+
+<p align="center">
+  <img src="assets/architecture.png" alt="opencodex 아키텍처 — Codex CLI가 opencodex 프록시를 통해 모든 LLM 프로바이더로 라우팅" width="820">
 </p>
 
 Codex는 오직 Responses API(`/v1/responses`)만 사용합니다. opencodex는 Codex와 여러분의 LLM

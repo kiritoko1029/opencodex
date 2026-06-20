@@ -1,22 +1,13 @@
-<div align="center">
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
-  <img alt="opencodex" src="assets/logo-light.png" width="96" height="96">
-</picture>
-
-# opencodex (`ocx`)
-
-**面向 [OpenAI Codex](https://openai.com/codex) 的通用 provider proxy —— 在 Codex CLI、App 和 SDK 中使用任意 LLM。**
-
-[English](README.md) · [한국어](README.ko.md) · **简体中文**
-
-📖 **[完整文档 →](https://lidge-jun.github.io/opencodex/zh-cn/)**
-
-</div>
+<p align="center">
+  <img src="assets/banner.png" alt="opencodex — 使用任意 LLM 的通用代理" width="820">
+</p>
 
 <p align="center">
-  <img src="assets/dashboard.png" alt="opencodex 控制台 —— 展示代理状态、provider 与可用模型的深色控制面板" width="820">
+  <a href="README.md">English</a> · <a href="README.ko.md">한국어</a> · <b>简体中文</b> · 📖 <a href="https://lidge-jun.github.io/opencodex/zh-cn/"><b>完整文档 →</b></a>
+</p>
+
+<p align="center">
+  <img src="assets/architecture.png" alt="opencodex 架构 — Codex CLI 通过 opencodex 代理路由到任意 LLM 提供商" width="820">
 </p>
 
 Codex 只能使用 Responses API（`/v1/responses`）。opencodex 位于 Codex 与你的 LLM

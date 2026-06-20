@@ -1,22 +1,13 @@
-<div align="center">
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
-  <img alt="opencodex" src="assets/logo-light.png" width="96" height="96">
-</picture>
-
-# opencodex (`ocx`)
-
-**Universal provider proxy for [OpenAI Codex](https://openai.com/codex) — use any LLM with Codex CLI, App, and SDK.**
-
-[English](README.md) · [한국어](README.ko.md) · [简体中文](README.zh-CN.md)
-
-📖 **[Full documentation →](https://lidge-jun.github.io/opencodex/)**
-
-</div>
+<p align="center">
+  <img src="assets/banner.png" alt="opencodex — Universal provider proxy for Codex, use any LLM" width="820">
+</p>
 
 <p align="center">
-  <img src="assets/dashboard.png" alt="opencodex dashboard — a dark provider control panel showing live proxy status, routed providers, and available models" width="820">
+  <a href="README.md">English</a> · <a href="README.ko.md">한국어</a> · <a href="README.zh-CN.md">简体中文</a> · 📖 <a href="https://lidge-jun.github.io/opencodex/"><b>Full documentation →</b></a>
+</p>
+
+<p align="center">
+  <img src="assets/architecture.png" alt="opencodex architecture — Codex CLI routes through opencodex proxy to any LLM provider" width="820">
 </p>
 
 Codex only speaks the Responses API (`/v1/responses`). opencodex sits between Codex and your LLM

@@ -7,6 +7,7 @@ import starlight from "@astrojs/starlight";
 export default defineConfig({
   site: "https://lidge-jun.github.io",
   base: "/opencodex",
+  trailingSlash: "ignore",
   integrations: [
     starlight({
       title: "opencodex",
@@ -19,6 +20,13 @@ export default defineConfig({
         replacesTitle: false,
       },
       favicon: "/favicon.png",
+      head: [
+        { tag: "meta", attrs: { property: "og:image", content: "https://lidge-jun.github.io/opencodex/og.png" } },
+        { tag: "meta", attrs: { property: "og:image:width", content: "1200" } },
+        { tag: "meta", attrs: { property: "og:image:height", content: "630" } },
+        { tag: "meta", attrs: { name: "twitter:card", content: "summary_large_image" } },
+        { tag: "meta", attrs: { name: "twitter:image", content: "https://lidge-jun.github.io/opencodex/og.png" } },
+      ],
       social: [
         { icon: "github", label: "GitHub", href: "https://github.com/lidge-jun/opencodex" },
       ],
