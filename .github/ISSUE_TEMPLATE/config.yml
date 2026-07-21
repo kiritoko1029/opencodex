@@ -1,8 +1,8 @@
 blank_issues_enabled: true
 contact_links:
   - name: Security policy
-    url: https://github.com/lidge-jun/opencodex/blob/main/SECURITY.md
+    url: https://github.com/kiritoko1029/opencodex/blob/main/SECURITY.md
     about: Read the supported-version and reporting guidance before sharing security-sensitive details.
   - name: Contributing guide
-    url: https://lidge-jun.github.io/opencodex/contributing/
+    url: https://github.com/kiritoko1029/opencodex#readme
     about: Review setup, build, and verification guidance for contributors.

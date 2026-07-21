@@ -57,7 +57,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: The installed `@bitkyc08/opencodex` version or commit SHA.
+      description: The installed `@kiritoko1029/opencodex` version or commit SHA.
       placeholder: 2.7.7
 
   - type: input
