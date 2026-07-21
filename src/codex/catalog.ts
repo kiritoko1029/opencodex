@@ -315,6 +315,12 @@ export interface CatalogModel {
   inputModalities?: string[];
   /** Provider opted into parallel tool calls (OcxProviderConfig.parallelToolCalls). */
   parallelToolCalls?: boolean;
+  /**
+   * Provider speaks the OpenAI Responses wire (adapter `openai-responses`) and can honor
+   * Codex Fast mode (`service_tier: "priority"`). When set, routed catalog entries keep the
+   * native template's service-tier metadata so the Codex App Fast toggle stays enabled.
+   */
+  supportsServiceTiers?: boolean;
 }
 
 type RawEntry = Record<string, unknown>;
@@ -506,16 +512,34 @@ function applyMultiAgentMode(entries: RawEntry[], mode: MultiAgentMode): RawEntr
   return entries;
 }
 
-export function normalizeRoutedCatalogEntry(entry: RawEntry, parallelToolCalls = false): RawEntry {
+/** Canonical Fast-mode catalog metadata matching current Codex native GPT entries. */
+const CODEX_FAST_SERVICE_TIER = {
+  id: "priority",
+  name: "Fast",
+  description: "1.5x speed, increased usage",
+} as const;
+
+export function normalizeRoutedCatalogEntry(
+  entry: RawEntry,
+  parallelToolCalls = false,
+  supportsServiceTiers = false,
+): RawEntry {
   delete entry.model_messages;
   delete entry.tool_mode;
   delete entry.multi_agent_version;
   delete entry.use_responses_lite;
   delete entry.supports_websockets;
-  delete entry.additional_speed_tiers;
-  delete entry.service_tier;
-  delete entry.service_tiers;
-  delete entry.default_service_tier;
+  // OpenAI-Responses custom channels (third-party GPT proxies) can honor Fast mode the same
+  // way OAuth ChatGPT natives do. Keep/inject the native Fast tier metadata so Codex App's
+  // supports_fast_mode() check passes; other adapters would only advertise an undeliverable option.
+  if (supportsServiceTiers) {
+    ensureRoutedFastServiceTiers(entry);
+  } else {
+    delete entry.additional_speed_tiers;
+    delete entry.service_tier;
+    delete entry.service_tiers;
+    delete entry.default_service_tier;
+  }
   const isCursorEntry = typeof entry.slug === "string" && entry.slug.startsWith("cursor/");
   // Routed providers use opencodex sidecars and client-executed tool discovery. The sidecar
   // runs through native gpt-5.4-mini, so image search is available and verbalized for text-only
@@ -535,6 +559,37 @@ export function normalizeRoutedCatalogEntry(entry: RawEntry, parallelToolCalls =
   // assembles multi-call turns (devlog/_plan/260709_parallel_tool_calls).
   entry.supports_parallel_tool_calls = isCursorEntry || parallelToolCalls === true;
   return ensureStrictCatalogFields(entry);
+}
+
+/**
+ * Make a routed entry advertise Fast the same way native OAuth GPT presets do:
+ * `service_tiers[].id = "priority"` (request value) plus legacy `additional_speed_tiers: ["fast"]`.
+ * Codex App enables the Fast toggle via ModelPreset::supports_fast_mode().
+ */
+function ensureRoutedFastServiceTiers(entry: RawEntry): void {
+  const tiers = Array.isArray(entry.service_tiers) ? entry.service_tiers : [];
+  const hasPriority = tiers.some(tier =>
+    !!tier && typeof tier === "object" && "id" in tier && (tier as { id?: unknown }).id === "priority",
+  );
+  if (!hasPriority) {
+    // Prefer rewriting a legacy `{id:"fast"}` row in place; otherwise append the canonical tier.
+    let rewritten = false;
+    entry.service_tiers = tiers.map(tier => {
+      if (rewritten || !tier || typeof tier !== "object" || !("id" in tier)) return tier;
+      if ((tier as { id?: unknown }).id !== "fast") return tier;
+      rewritten = true;
+      return { ...tier, id: "priority", name: (tier as { name?: unknown }).name ?? CODEX_FAST_SERVICE_TIER.name };
+    });
+    if (!rewritten) {
+      entry.service_tiers = [...tiers, { ...CODEX_FAST_SERVICE_TIER }];
+    }
+  }
+  // Legacy fallback still consulted by older clients. Keep only string tier ids.
+  const legacyRaw = Array.isArray(entry.additional_speed_tiers) ? entry.additional_speed_tiers : [];
+  const legacy = legacyRaw.filter((tier): tier is string => typeof tier === "string");
+  entry.additional_speed_tiers = legacy.includes("fast") ? legacy : [...legacy, "fast"];
+  // Drop bare service_tier — natives leave it unset and let the client/config choose.
+  delete entry.service_tier;
 }
 
 // provider + NATIVE model id are passed separately: the Codex-facing slug may carry an
@@ -893,7 +948,7 @@ function deriveEntry(
         );
       }
       applyReasoningLevels(e, model?.reasoningEfforts, model?.defaultReasoningEffort, preserveExact);
-      normalizeRoutedCatalogEntry(e, model?.parallelToolCalls === true);
+      normalizeRoutedCatalogEntry(e, model?.parallelToolCalls === true, model?.supportsServiceTiers === true);
       if (model) applyJawcodeCatalogMetadata(e, model.provider, model.id, model.contextCap);
       applyCatalogModelMetadata(e, model);
     } else {
@@ -1138,6 +1193,8 @@ export function applyProviderConfigHints(name: string, prov: OcxProviderConfig, 
     ...(prov.parallelToolCalls === true || (prov.adapter === "openai-chat" && prov.parallelToolCalls !== false)
       ? { parallelToolCalls: true }
       : {}),
+    // Responses-wire providers can carry Codex Fast mode (`service_tier: "priority"`).
+    ...(prov.adapter === "openai-responses" ? { supportsServiceTiers: true } : {}),
   };
   const capped = applyProviderContextCap(hinted.contextWindow, providerCap);
   if (providerCap !== undefined && capped !== hinted.contextWindow) {
@@ -1491,6 +1548,9 @@ export function deriveComboCatalogModel(
     ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
     ...(members.every(member => member.parallelToolCalls === true)
       ? { parallelToolCalls: true }
+      : {}),
+    ...(members.every(member => member.supportsServiceTiers === true)
+      ? { supportsServiceTiers: true }
       : {}),
   };
 }

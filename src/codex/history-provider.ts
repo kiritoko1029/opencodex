@@ -11,8 +11,16 @@ function historyBackupPathFor(stateDbPath: string): string {
   const id = createHash("sha256").update(normalized).digest("hex").slice(0, 16);
   return join(getConfigDir(), `codex-history-backup-${id}.json`);
 }
+function foreignHistoryBackupPathFor(stateDbPath: string): string {
+  const normalized = process.platform === "win32" ? resolve(stateDbPath).toLowerCase() : resolve(stateDbPath);
+  const id = createHash("sha256").update(normalized).digest("hex").slice(0, 16);
+  return join(getConfigDir(), `codex-history-foreign-backup-${id}.json`);
+}
 const HISTORY_BACKUP_PATH = historyBackupPathFor(STATE_DB_PATH);
+const FOREIGN_HISTORY_BACKUP_PATH = foreignHistoryBackupPathFor(STATE_DB_PATH);
 const RESUMABLE_SOURCES = ["cli", "vscode"] as const;
+/** Providers Design B already owns — never "park" these as foreign. */
+const NATIVE_HISTORY_PROVIDERS = new Set(["openai", "opencodex"]);
 
 /**
  * Open the live `state_5.sqlite` the way the Codex app expects a *secondary* writer to behave:
@@ -628,5 +636,186 @@ export function countPendingOpencodexHistory(stateDbPath = STATE_DB_PATH, backup
     if (isRecoverableHistoryError(error)) return { pendingRows: 0, backupEntries, failed: true };
     // Schema drift (e.g. a future codex renames the table) is a "cannot know" too, not a crash.
     return { pendingRows: 0, backupEntries, failed: true };
+  }
+}
+
+/**
+ * Normalize a candidate foreign provider id. Empty / native (`openai` / `opencodex`) values
+ * are dropped — Design B already owns those tags.
+ */
+export function normalizeForeignHistoryProviders(providers: Array<string | null | undefined>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of providers) {
+    const provider = typeof raw === "string" ? raw.trim() : "";
+    if (!provider || NATIVE_HISTORY_PROVIDERS.has(provider) || seen.has(provider)) continue;
+    seen.add(provider);
+    out.push(provider);
+  }
+  return out;
+}
+
+/**
+ * Design B parks threads that still carry a *stripped* root `model_provider` (e.g. `custom`)
+ * under `openai` so Codex App keeps listing them while the built-in openai provider is active.
+ * Originals live in a *separate* backup from the legacy opencodex↔openai remap file so the
+ * Design-B migration guardian can keep restoring/ejecting that file without undoing the park.
+ */
+export function parkForeignHistoryProviders(
+  providers: Array<string | null | undefined>,
+  stateDbPath = STATE_DB_PATH,
+  backupPath = FOREIGN_HISTORY_BACKUP_PATH,
+  opts: { attempts?: number; delayMs?: number; sleepFn?: (ms: number) => void } = {},
+): CodexHistorySyncResult {
+  const targets = normalizeForeignHistoryProviders(providers);
+  if (targets.length === 0 || !existsSync(stateDbPath)) return { rows: 0, files: 0 };
+  return withHistoryRetry(() => parkForeignHistoryProvidersUnsafe(targets, stateDbPath, backupPath), opts)
+    ?? { rows: 0, files: 0, failed: true };
+}
+
+function parkForeignHistoryProvidersUnsafe(
+  providers: string[],
+  stateDbPath: string,
+  backupPath: string,
+): CodexHistorySyncResult {
+  const db = openStateDb(stateDbPath);
+  try {
+    const placeholders = providers.map(() => "?").join(",");
+    const rows = db
+      .query<ThreadRow, string[]>(`
+        SELECT id, rollout_path, model_provider, source, has_user_event
+        FROM threads
+        WHERE model_provider IN (${placeholders})
+          AND trim(coalesce(first_user_message, '')) != ''
+      `)
+      .all(...providers);
+    if (rows.length === 0) return { rows: 0, files: 0 };
+
+    const manifest = readBackup(backupPath, stateDbPath);
+    for (const row of rows) rememberOriginal(manifest, row);
+    writeBackup(backupPath, manifest, stateDbPath);
+
+    let files = 0;
+    for (const row of rows) {
+      try {
+        if (updateSessionMeta(row.rollout_path, row.id, { provider: "openai" })) files++;
+      } catch {
+        /* best-effort; keep DB migration moving even if one old rollout is malformed */
+      }
+    }
+
+    const update = db.transaction(() => {
+      const mark = db.query(`
+        UPDATE threads
+        SET model_provider = 'openai',
+            has_user_event = 1
+        WHERE id = ?
+          AND trim(coalesce(first_user_message, '')) != ''
+      `);
+      for (const row of rows) mark.run(row.id);
+    });
+    update();
+
+    return { rows: rows.length, files };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Undo {@link parkForeignHistoryProviders} on `ocx stop` / `ocx restore` so a journal-restored
+ * `model_provider = "custom"` (etc.) again matches its thread tags.
+ */
+export function restoreParkedForeignHistory(
+  stateDbPath = STATE_DB_PATH,
+  backupPath = FOREIGN_HISTORY_BACKUP_PATH,
+  opts: { skipWhenProvablyNoop?: boolean; attempts?: number; delayMs?: number; sleepFn?: (ms: number) => void } = {},
+): CodexHistorySyncResult {
+  if (opts.skipWhenProvablyNoop) {
+    try {
+      const manifest = readBackup(backupPath, stateDbPath);
+      if (Object.keys(manifest.entries).length === 0) return { rows: 0, files: 0 };
+    } catch {
+      return { rows: 0, files: 0 };
+    }
+  }
+  if (!existsSync(stateDbPath)) {
+    // Drop a stale manifest so the next start does not keep retrying forever.
+    try { writeBackup(backupPath, { version: 1, stateDbPath, entries: {} }, stateDbPath); } catch { /* ignore */ }
+    return { rows: 0, files: 0 };
+  }
+  return withHistoryRetry(() => restoreParkedForeignHistoryUnsafe(stateDbPath, backupPath), opts)
+    ?? { rows: 0, files: 0, failed: true };
+}
+
+function restoreParkedForeignHistoryUnsafe(stateDbPath: string, backupPath: string): CodexHistorySyncResult {
+  const manifest = readBackup(backupPath, stateDbPath);
+  const entries = Object.values(manifest.entries);
+  if (entries.length === 0) return { rows: 0, files: 0 };
+
+  const db = openStateDb(stateDbPath);
+  try {
+    let files = 0;
+    for (const entry of entries) {
+      try {
+        if (updateSessionMeta(entry.rolloutPath, entry.id, {
+          provider: entry.modelProvider,
+          source: entry.source,
+        })) files++;
+      } catch {
+        /* best-effort; keep DB restore moving even if one rollout disappeared */
+      }
+    }
+
+    const restore = db.transaction(() => {
+      const update = db.query(`
+        UPDATE threads
+        SET model_provider = ?,
+            source = ?,
+            has_user_event = ?
+        WHERE id = ?
+      `);
+      for (const entry of entries) {
+        update.run(entry.modelProvider, entry.source, entry.hasUserEvent, entry.id);
+      }
+    });
+    restore();
+    writeBackup(backupPath, { version: 1, stateDbPath, entries: {} }, stateDbPath);
+    return { rows: entries.length, files };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Read-only probe used by the Design-B guardian / doctor: threads still tagged with a foreign
+ * provider that park would move. The foreign backup itself is *intentional* while the proxy
+ * runs, so it is not counted as pending work.
+ */
+export function countPendingForeignHistory(
+  providers: Array<string | null | undefined>,
+  stateDbPath = STATE_DB_PATH,
+): PendingHistoryCount {
+  const targets = normalizeForeignHistoryProviders(providers);
+  if (targets.length === 0) return { pendingRows: 0, backupEntries: 0 };
+  if (!existsSync(stateDbPath)) return { pendingRows: 0, backupEntries: 0 };
+  try {
+    const db = new Database(stateDbPath, { readonly: true });
+    try {
+      db.exec("PRAGMA busy_timeout = 100");
+      const placeholders = targets.map(() => "?").join(",");
+      const row = db.query<{ n: number }, string[]>(`
+        SELECT count(*) AS n
+        FROM threads
+        WHERE model_provider IN (${placeholders})
+          AND trim(coalesce(first_user_message, '')) != ''
+      `).get(...targets);
+      return { pendingRows: row?.n ?? 0, backupEntries: 0 };
+    } finally {
+      db.close();
+    }
+  } catch (error) {
+    if (isRecoverableHistoryError(error)) return { pendingRows: 0, backupEntries: 0, failed: true };
+    return { pendingRows: 0, backupEntries: 0, failed: true };
   }
 }

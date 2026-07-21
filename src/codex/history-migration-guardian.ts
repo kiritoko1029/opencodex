@@ -1,4 +1,5 @@
-import { countPendingOpencodexHistory, migrateHistoryToOpenai } from "./history-provider";
+import { countPendingForeignHistory, countPendingOpencodexHistory, migrateHistoryToOpenai, parkForeignHistoryProviders } from "./history-provider";
+import { readJournalOriginalRootModelProvider } from "./journal";
 
 /**
  * Daemon-side retry for the one-time Design-B history migration.
@@ -8,6 +9,9 @@ import { countPendingOpencodexHistory, migrateHistoryToOpenai } from "./history-
  * every legacy thread is still tagged `opencodex` and invisible to the app. Instead
  * of asking the user to close the app and rerun start, this guardian keeps retrying
  * in the background until the migration lands.
+ *
+ * It also parks threads whose root `model_provider` Design B stripped (e.g. `custom`):
+ * those stay invisible under the built-in openai provider until remapped.
  *
  * Design constraints (audit-driven):
  * - Ticks use `{ attempts: 1 }`: no sleepSync inside the daemon event loop; the tick
@@ -22,8 +26,8 @@ export interface HistoryMigrationGuardianHandle {
 }
 
 export interface HistoryMigrationGuardianDeps {
-  countFn?: typeof countPendingOpencodexHistory;
-  migrateFn?: () => ReturnType<typeof migrateHistoryToOpenai>;
+  countFn?: () => { pendingRows: number; backupEntries: number; failed?: true };
+  migrateFn?: () => { rows: number; files: number; ejectedRows?: number; failed?: true };
   log?: Pick<Console, "log">;
   tickMs?: number;
   maxTicks?: number;
@@ -40,9 +44,32 @@ function defaultSchedule(fn: () => void, ms: number): { cancel(): void } {
   return { cancel: () => clearTimeout(timer) };
 }
 
+function defaultCountPending(): { pendingRows: number; backupEntries: number; failed?: true } {
+  const ocx = countPendingOpencodexHistory();
+  const foreign = countPendingForeignHistory([readJournalOriginalRootModelProvider()]);
+  return {
+    pendingRows: ocx.pendingRows + foreign.pendingRows,
+    // Foreign backup entries are intentional while the proxy runs — only the legacy
+    // opencodex↔openai backup counts as "migration still unfinished".
+    backupEntries: ocx.backupEntries,
+    failed: ocx.failed || foreign.failed ? true : undefined,
+  };
+}
+
+function defaultMigrate(): { rows: number; files: number; ejectedRows?: number; failed?: true } {
+  const ocx = migrateHistoryToOpenai(undefined, undefined, { attempts: 1 });
+  const foreign = parkForeignHistoryProviders([readJournalOriginalRootModelProvider()], undefined, undefined, { attempts: 1 });
+  return {
+    rows: ocx.rows + foreign.rows,
+    files: ocx.files + foreign.files,
+    ejectedRows: ocx.ejectedRows,
+    failed: ocx.failed || foreign.failed ? true : undefined,
+  };
+}
+
 export function startHistoryMigrationGuardian(deps: HistoryMigrationGuardianDeps = {}): HistoryMigrationGuardianHandle {
-  const countFn = deps.countFn ?? countPendingOpencodexHistory;
-  const migrateFn = deps.migrateFn ?? (() => migrateHistoryToOpenai(undefined, undefined, { attempts: 1 }));
+  const countFn = deps.countFn ?? defaultCountPending;
+  const migrateFn = deps.migrateFn ?? defaultMigrate;
   const log = deps.log ?? console;
   const tickMs = deps.tickMs ?? DEFAULT_TICK_MS;
   const maxTicks = deps.maxTicks ?? DEFAULT_MAX_TICKS;
@@ -70,7 +97,7 @@ export function startHistoryMigrationGuardian(deps: HistoryMigrationGuardianDeps
       if (!result.failed) {
         const moved = result.rows + (result.ejectedRows ?? 0);
         if (moved > 0) {
-          log.log(`🩹 history-migration: ${moved} legacy opencodex thread(s) migrated back to openai.`);
+          log.log(`🩹 history-migration: ${moved} thread(s) migrated for Design B visibility.`);
         }
         // A "successful" zero-row migration can also mean the DB does not exist YET while a
         // backup manifest still holds restore work (fresh reinstall race). Only stop when a

@@ -57,7 +57,7 @@ describe("history migration guardian", () => {
     expect(sched.runNext()).toBe(true); // tick 2: locked
     expect(sched.runNext()).toBe(true); // tick 3: success
     expect(attempts).toBe(3);
-    expect(logs.some(l => l.includes("3 legacy opencodex thread(s) migrated"))).toBe(true);
+    expect(logs.some(l => l.includes("3 thread(s) migrated for Design B visibility"))).toBe(true);
     expect(sched.size).toBe(0); // stopped after success
   });
 

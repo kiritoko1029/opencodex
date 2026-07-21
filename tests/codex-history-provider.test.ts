@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { countPendingOpencodexHistory, isRecoverableHistoryError, migrateHistoryToOpenai, restoreLegacyOpenaiHistory, setHistoryDbBusyTimeoutForTests, syncCodexHistoryProvider, withHistoryRetry } from "../src/codex/history-provider";
+import { countPendingForeignHistory, countPendingOpencodexHistory, isRecoverableHistoryError, migrateHistoryToOpenai, normalizeForeignHistoryProviders, parkForeignHistoryProviders, restoreLegacyOpenaiHistory, restoreParkedForeignHistory, setHistoryDbBusyTimeoutForTests, syncCodexHistoryProvider, withHistoryRetry } from "../src/codex/history-provider";
 
 // Windows CI: a transient file lock can consume the full production 5s busy timeout, tripping
 // bun's 5s default per-test timeout by itself. Fail fast into withHistoryRetry instead.
@@ -453,5 +453,67 @@ describe("Design B migration helpers", () => {
     const db = new Database(pending.dbPath);
     expect(db.query("SELECT model_provider FROM threads WHERE id = 'thread-3'").get()).toEqual({ model_provider: "openai" });
     db.close();
+  });
+
+  test("parkForeignHistoryProviders remaps a stripped root provider and restore puts it back", () => {
+    const dir = join(tmpdir(), `ocx-foreign-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    mkdirSync(dir, { recursive: true });
+    const rollout = join(dir, "custom-rollout.jsonl");
+    writeFileSync(rollout, [
+      JSON.stringify({
+        type: "session_meta",
+        payload: { id: "thread-custom", model_provider: "custom", source: "vscode", cwd: dir },
+      }),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-01-01T00:00:00.000Z", payload: { message: "x" } }),
+    ].join("\n") + "\n");
+    const dbPath = join(dir, "state_5.sqlite");
+    const backupPath = join(dir, "foreign-backup.json");
+    const db = new Database(dbPath);
+    db.run(`
+      CREATE TABLE threads (
+        id TEXT PRIMARY KEY,
+        rollout_path TEXT NOT NULL,
+        model_provider TEXT NOT NULL,
+        source TEXT NOT NULL,
+        first_user_message TEXT NOT NULL,
+        has_user_event INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    db.run(`
+      INSERT INTO threads (id, rollout_path, model_provider, source, first_user_message, has_user_event)
+      VALUES ('thread-custom', ?, 'custom', 'vscode', 'hello from custom', 1)
+    `, rollout);
+    db.close();
+
+    expect(normalizeForeignHistoryProviders(["custom", "openai", "opencodex", "custom", ""])).toEqual(["custom"]);
+    expect(countPendingForeignHistory(["custom"], dbPath).pendingRows).toBe(1);
+
+    const parked = parkForeignHistoryProviders(["custom"], dbPath, backupPath);
+    expect(parked).toEqual({ rows: 1, files: 1 });
+    expect(countPendingForeignHistory(["custom"], dbPath).pendingRows).toBe(0);
+
+    const afterPark = new Database(dbPath);
+    expect(afterPark.query("SELECT model_provider FROM threads WHERE id = 'thread-custom'").get())
+      .toEqual({ model_provider: "openai" });
+    afterPark.close();
+    expect(latestSessionMetaPayload(rollout).model_provider).toBe("openai");
+    expect(JSON.parse(readFileSync(backupPath, "utf8")).entries["thread-custom"].modelProvider).toBe("custom");
+
+    // Legacy Design-B migrate must NOT undo the foreign park (separate backup file).
+    const legacy = migrateHistoryToOpenai(dbPath, join(dir, "legacy-backup.json"));
+    expect(legacy.rows).toBe(0);
+    const stillParked = new Database(dbPath);
+    expect(stillParked.query("SELECT model_provider FROM threads WHERE id = 'thread-custom'").get())
+      .toEqual({ model_provider: "openai" });
+    stillParked.close();
+
+    const restored = restoreParkedForeignHistory(dbPath, backupPath);
+    expect(restored).toEqual({ rows: 1, files: 1 });
+    const afterRestore = new Database(dbPath);
+    expect(afterRestore.query("SELECT model_provider, source FROM threads WHERE id = 'thread-custom'").get())
+      .toEqual({ model_provider: "custom", source: "vscode" });
+    afterRestore.close();
+    expect(latestSessionMetaPayload(rollout).model_provider).toBe("custom");
+    expect(existsSync(backupPath)).toBe(false);
   });
 });

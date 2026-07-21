@@ -2,7 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { augmentRoutedModelsWithJawcodeMetadata, augmentRoutedModelsWithRegistryOpenAiApiRows, buildCatalogEntries, deriveComboCatalogModel, exactComboCatalogSlugs, filterCatalogVisibleModels, filterSupportedNativeSlugs, gatherRoutedModels, isDatedVariantId, isMediaGenerationModelId, loadBundledCodexCatalog, materializeBundledCodexCatalog, mergeCatalogEntriesForSync, NATIVE_OPENAI_MODELS, normalizeRoutedCatalogEntry, resetCatalogRuntimeStateForTests, resetOpenAiApiCatalogWarningStateForTests } from "../src/codex/catalog";
+import { applyProviderConfigHints, augmentRoutedModelsWithJawcodeMetadata, augmentRoutedModelsWithRegistryOpenAiApiRows, buildCatalogEntries, deriveComboCatalogModel, exactComboCatalogSlugs, filterCatalogVisibleModels, filterSupportedNativeSlugs, gatherRoutedModels, isDatedVariantId, isMediaGenerationModelId, loadBundledCodexCatalog, materializeBundledCodexCatalog, mergeCatalogEntriesForSync, NATIVE_OPENAI_MODELS, normalizeRoutedCatalogEntry, resetCatalogRuntimeStateForTests, resetOpenAiApiCatalogWarningStateForTests } from "../src/codex/catalog";
 import {
   CURSOR_STATIC_MODELS,
   filterCursorConfiguredModelsByLiveDiscovery,
@@ -357,6 +357,33 @@ describe("Codex catalog routed normalization", () => {
     expect(entry.supports_search_tool).toBe(true);
   });
 
+  test("normalizeRoutedCatalogEntry keeps Fast-mode tiers for openai-responses channels", () => {
+    const entry = nativeTemplate();
+
+    normalizeRoutedCatalogEntry(entry, false, true);
+
+    // Request id is "priority"; legacy additional_speed_tiers keeps "fast" for older clients.
+    expect(entry.service_tiers).toEqual([{ id: "priority", name: "Fast" }]);
+    expect(entry.additional_speed_tiers).toEqual(["fast"]);
+    expect(entry).not.toHaveProperty("service_tier");
+    expect(entry.default_service_tier).toBe("priority");
+    expect(entry).not.toHaveProperty("model_messages");
+    expect(entry).not.toHaveProperty("supports_websockets");
+  });
+
+  test("normalizeRoutedCatalogEntry injects Fast tiers when the template omitted them", () => {
+    const entry = { slug: "bs-sub/gpt-5.6-sol", display_name: "bs-sub/gpt-5.6-sol" } as Record<string, unknown>;
+
+    normalizeRoutedCatalogEntry(entry, false, true);
+
+    expect(entry.service_tiers).toEqual([{
+      id: "priority",
+      name: "Fast",
+      description: "1.5x speed, increased usage",
+    }]);
+    expect(entry.additional_speed_tiers).toEqual(["fast"]);
+  });
+
   test("buildCatalogEntries strips routed entries cloned from native templates", () => {
     const entries = buildCatalogEntries(nativeTemplate(), ["gpt-5.5"], [
       { provider: "anthropic", id: "claude-sonnet-4-6", owned_by: "anthropic" },
@@ -381,6 +408,36 @@ describe("Codex catalog routed normalization", () => {
     expect(routed?.base_instructions).toContain("claude-sonnet-4-6");
     expect(routed?.default_reasoning_level).toBe("medium");
   });
+
+  test("buildCatalogEntries keeps Fast-mode tiers for openai-responses custom channels", () => {
+    const entries = buildCatalogEntries(nativeTemplate(), ["gpt-5.5"], [
+      { provider: "bs-sub", id: "gpt-5.6-sol", owned_by: "bs-sub", supportsServiceTiers: true },
+    ]);
+    const routed = entries.find(e => e.slug === "bs-sub/gpt-5.6-sol");
+
+    expect(routed).toBeDefined();
+    expect(routed?.service_tiers).toEqual([{ id: "priority", name: "Fast" }]);
+    expect(routed?.additional_speed_tiers).toEqual(["fast"]);
+    expect(routed).not.toHaveProperty("service_tier");
+    expect(routed?.default_service_tier).toBe("priority");
+  });
+
+  test("applyProviderConfigHints marks openai-responses providers for Fast-mode catalog tiers", () => {
+    const responses = applyProviderConfigHints("bs-sub", {
+      adapter: "openai-responses",
+      baseUrl: "https://example.test/v1",
+      apiKey: "sk-test",
+    } as never, { id: "gpt-5.6-sol", provider: "bs-sub" });
+    expect(responses.supportsServiceTiers).toBe(true);
+
+    const chat = applyProviderConfigHints("xai", {
+      adapter: "openai-chat",
+      baseUrl: "https://api.x.ai/v1",
+      apiKey: "sk-test",
+    } as never, { id: "grok-4.5", provider: "xai" });
+    expect(chat.supportsServiceTiers).toBeUndefined();
+  });
+
   test("buildCatalogEntries advertises parallel tool calls only for Cursor routed models", () => {
     const entries = buildCatalogEntries(nativeTemplate(), [], [
       { provider: "cursor", id: "composer-2.5", owned_by: "cursor" },

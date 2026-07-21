@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteFile } from "../config";
-import { CODEX_HOME, CODEX_CONFIG_PATH, CODEX_PROFILE_PATH } from "./paths";
+import { CODEX_HOME, CODEX_CONFIG_PATH, CODEX_PROFILE_PATH, readRootTomlString } from "./paths";
 
 const JOURNAL_PATH = join(CODEX_HOME, "opencodex-journal.json");
 
@@ -107,6 +107,22 @@ export function restoreJournalState(): RestoreJournalResult {
 
 export function restoreJournal(): boolean {
   return restoreJournalState().complete;
+}
+
+/**
+ * Root `model_provider` from the pre-inject journal snapshot. Design B strips any root
+ * provider and parks its threads under `openai`; this lets inject/sync recover the stripped
+ * id after the live config.toml no longer carries it.
+ */
+export function readJournalOriginalRootModelProvider(): string | null {
+  const journal = readJournal();
+  if (!journal) return null;
+  try {
+    const config = Buffer.from(journal.originalConfig, "base64").toString("utf-8");
+    return readRootTomlString(config, "model_provider");
+  } catch {
+    return null;
+  }
 }
 
 export function reconcileJournal(): boolean {

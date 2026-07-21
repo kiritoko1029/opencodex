@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { atomicWriteFile, loadConfig, websocketsEnabled } from "../config";
-import { markJournalInjectedState, restoreJournalState, writeJournal } from "./journal";
+import { markJournalInjectedState, readJournalOriginalRootModelProvider, restoreJournalState, writeJournal } from "./journal";
 import { restoreCodexCatalog } from "./catalog";
-import { migrateHistoryToOpenai, syncCodexHistoryProvider } from "./history-provider";
+import { migrateHistoryToOpenai, parkForeignHistoryProviders, restoreParkedForeignHistory, syncCodexHistoryProvider } from "./history-provider";
 import { CODEX_CONFIG_PATH, CODEX_PROFILE_PATH, DEFAULT_CATALOG_PATH, parseTomlString, readRootTomlString, resolveCodexConfigPath, tomlString } from "./paths";
 import type { OcxConfig } from "../types";
 
@@ -370,6 +370,8 @@ export async function injectCodexConfig(port: number, config?: OcxConfig, option
   // EOL boundary: transforms below are LF-pure; preserve the file's dominant ending on write.
   const eol = dominantEol(rawContent);
   let content = applyEol(rawContent, "\n");
+  // Capture before stripExistingModelProvider removes it — Design B parks these threads under openai.
+  const rootProviderBeforeStrip = readRootTomlString(content, "model_provider");
 
   // Idempotent clean-up of any prior injection: drop the provider table (marker-based) and every
   // stray/mis-nested model_provider line, so re-injecting can't duplicate keys or leave the buggy
@@ -415,17 +417,27 @@ export async function injectCodexConfig(port: number, config?: OcxConfig, option
   // Legacy mode still forward-tags history so re-tagged threads stay listable. Design B needs
   // the opposite: a one-time migration of previously re-tagged threads BACK to openai (restore
   // machinery; cheap no-op when there is nothing to migrate).
+  // When Design B strips a non-openai root provider (e.g. model_provider="custom"), also park
+  // those threads under openai — otherwise Codex App hides them. Journal covers re-sync after
+  // the live root key is already gone.
   const history = config?.syncResumeHistory !== false
     ? (legacyMode ? syncCodexHistoryProvider("opencodex") : migrateHistoryToOpenai())
+    : { rows: 0, files: 0 };
+  const foreignProvider = !legacyMode && config?.syncResumeHistory !== false
+    ? (rootProviderBeforeStrip ?? readJournalOriginalRootModelProvider())
+    : null;
+  const foreign = foreignProvider
+    ? parkForeignHistoryProviders([foreignProvider])
     : { rows: 0, files: 0 };
 
   const catalogMessage = catalogPath
     ? `  Codex model catalog: ${catalogPath}\n`
     : `  Codex model catalog not injected because no opencodex catalog file exists yet.\n`;
-  const migratedRows = (history.rows ?? 0) + ("ejectedRows" in history ? history.ejectedRows ?? 0 : 0);
+  const migratedRows = (history.rows ?? 0) + ("ejectedRows" in history ? history.ejectedRows ?? 0 : 0) + (foreign.rows ?? 0);
+  const historyFailed = !!(history.failed || foreign.failed);
   const historyMessage = config?.syncResumeHistory === false
     ? `  Codex resume history: left unchanged (syncResumeHistory=false).\n`
-    : history.failed
+    : historyFailed
       ? (legacyMode
         ? `  ⚠️ Codex resume history sync SKIPPED: the history DB is locked (Codex app/IDE open?). Close it and rerun 'ocx start'.\n`
         // Honest in every caller context: the daemon retries in the background while it runs,
@@ -434,7 +446,7 @@ export async function injectCodexConfig(port: number, config?: OcxConfig, option
       : legacyMode
         ? `  Codex resume history: ${history.rows} thread(s) made visible for opencodex; originals backed up for restore.\n`
         : migratedRows > 0
-          ? `  Codex resume history: ${migratedRows} legacy opencodex-tagged thread(s) migrated back to openai (one-time).\n`
+          ? `  Codex resume history: ${migratedRows} thread(s) made visible for Design B (legacy opencodex and/or stripped root provider); originals backed up for restore.\n`
           : `  Codex resume history: untouched (threads keep their native openai tag).\n`;
   // A user-owned root openai_base_url means we did NOT install routing — say so honestly
   // instead of claiming the proxy route is active (catalog/fast_mode were still written).
@@ -557,13 +569,15 @@ export function restoreNativeCodex(): { success: boolean; message: string } {
     skipWhenProvablyNoop = !shouldInjectApiAuthHeader(loadConfig());
   } catch { /* unreadable config: keep the conservative write-open restore */ }
   const history = syncCodexHistoryProvider("openai", undefined, undefined, { skipWhenProvablyNoop });
+  const foreign = restoreParkedForeignHistory(undefined, undefined, { skipWhenProvablyNoop });
   const msg = cat.removed > 0
     ? `${cfg.message} Catalog restored to ${cat.kept} native model(s) (dropped ${cat.removed} proxy-routed).`
     : cfg.message;
-  const historyMsg = history.failed
+  const historyFailed = !!(history.failed || foreign.failed);
+  const historyMsg = historyFailed
     ? ` ⚠️ Codex resume history could NOT be restored — the Codex app appears to be holding the history DB. Close the Codex app/IDE and run 'ocx stop' again; until then routed threads stay hidden in the native app.`
-    : history.rows > 0
-      ? ` Resume history restored from opencodex backup (${history.rows} thread(s)).`
+    : history.rows > 0 || foreign.rows > 0
+      ? ` Resume history restored from opencodex backup (${history.rows + foreign.rows} thread(s)).`
       : history.ejectedRows
         ? ` ${history.ejectedRows} opencodex history thread(s) were ejected to openai so native Codex can resume them.`
         : "";
