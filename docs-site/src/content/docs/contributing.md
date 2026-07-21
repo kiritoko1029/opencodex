@@ -6,7 +6,7 @@ description: Develop opencodex — setup, layout, conventions, and how to add a 
 ## Setup
 
 ```bash
-git clone https://github.com/lidge-jun/opencodex.git
+git clone https://github.com/kiritoko1029/opencodex.git
 cd opencodex
 bun install
 bun run dev:proxy    # proxy API in dev mode
@@ -45,7 +45,7 @@ cd docs-site && bun install && bun dev
 
 ## Docs publishing
 
-The public docs publish to GitHub Pages at <https://lidge-jun.github.io/opencodex/>. The
+The public docs publish to GitHub Pages at <https://kiritoko1029.github.io/opencodex/>. The
 `.github/workflows/deploy-docs.yml` workflow runs on `main` pushes that touch `docs-site/**` or the
 workflow itself, builds `docs-site`, and deploys the generated site. Before pushing docs changes,
 run:

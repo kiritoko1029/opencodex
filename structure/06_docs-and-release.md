@@ -13,7 +13,7 @@ sidebar and either add localized copies or intentionally accept Starlight fallba
 `.github/workflows/deploy-docs.yml` publishes the docs to:
 
 ```text
-https://lidge-jun.github.io/opencodex/
+https://kiritoko1029.github.io/opencodex/
 ```
 
 The workflow runs on `main` pushes touching `docs-site/**` or the workflow itself, builds
@@ -87,7 +87,7 @@ Every npm release version must map cleanly across four surfaces:
 | Surface | Required state |
 | --- | --- |
 | `package.json` | `version` equals the release workflow `version` input. |
-| npm registry | `@bitkyc08/opencodex@<version>` does not exist before publish, then exists after publish with the requested dist-tag. |
+| npm registry | `@kiritoko1029/opencodex@<version>` does not exist before publish, then exists after publish with the requested dist-tag. |
 | Git tag | `v<version>` does not exist before publish, then points at the exact release commit. |
 | GitHub Release | `v<version>` does not exist before publish, then is created from the exact release commit. |
 
@@ -102,7 +102,7 @@ after an explicit human decision that the public history rewrite is acceptable.
 Manual preflight checks when debugging a release:
 
 ```bash
-npm view @bitkyc08/opencodex@<version> version
+npm view @kiritoko1029/opencodex@<version> version
 git ls-remote origin refs/tags/v<version>
 gh release view v<version>
 ```
@@ -132,7 +132,7 @@ and the Node-only global-install smoke path:
 npm install
 npm run build:gui
 npm pack --json > pack.json
-npm install -g ./bitkyc08-opencodex-*.tgz
+npm install -g ./kiritoko1029-opencodex-*.tgz
 ocx help
 ```
 

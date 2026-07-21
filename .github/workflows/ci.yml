@@ -123,7 +123,7 @@ jobs:
 
       - name: Install globally (downloads bundled bun)
         shell: bash
-        run: npm install -g ./bitkyc08-opencodex-*.tgz
+        run: npm install -g ./kiritoko1029-opencodex-*.tgz
 
       - name: ocx help via bundled bun
         run: ocx help

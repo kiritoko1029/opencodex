@@ -4,7 +4,7 @@ Date: 2026-06-20
 
 > **Archive note.** This is a dated design-rationale record, not current behavior
 > documentation. For up-to-date behavior see the published docs at
-> [lidge-jun.github.io/opencodex](https://lidge-jun.github.io/opencodex/) and the
+> [kiritoko1029.github.io/opencodex](https://kiritoko1029.github.io/opencodex/) and the
 > maintainer source-of-truth under [`structure/`](../structure). The current injected
 > provider table name is `"OpenCodex Proxy"` (see `src/codex/inject.ts`).
 

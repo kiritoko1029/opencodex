@@ -2,7 +2,7 @@
 
 Thanks for helping with opencodex.
 
-- Start with the canonical guide: [Contributing](https://lidge-jun.github.io/opencodex/contributing/)
+- Start with the canonical guide: [Contributing](https://kiritoko1029.github.io/opencodex/contributing/)
 - Public user docs live in [`docs-site/`](./docs-site)
 - Current maintainer invariants live in [`structure/`](./structure)
 - Historical investigations live in [`docs/`](./docs)

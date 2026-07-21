@@ -20,7 +20,7 @@ import {
 } from "./index";
 import { isNewer } from "./notify";
 
-const RELEASE_NOTES_URL = "https://github.com/lidge-jun/opencodex/releases/latest";
+const RELEASE_NOTES_URL = "https://github.com/kiritoko1029/opencodex/releases/latest";
 const UPDATE_JOB_FILENAME = "update-job.json";
 const UPDATE_TIMEOUT_MS = 180_000;
 const RESTART_TIMEOUT_MS = 60_000;

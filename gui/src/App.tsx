@@ -259,7 +259,7 @@ export default function App() {
             aria-label={t("dash.stop")} title={t("dash.stop")}>
             <IconPower /> <span className="mode">{stopping ? t("dash.stopping") : t("dash.stop")}</span>
           </button>
-          <a className="sidebar-link" href="https://github.com/lidge-jun/opencodex" target="_blank" rel="noreferrer">
+          <a className="sidebar-link" href="https://github.com/kiritoko1029/opencodex" target="_blank" rel="noreferrer">
             <IconGithub /> {t("common.github")}
           </a>
         </div>

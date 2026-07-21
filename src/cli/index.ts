@@ -386,7 +386,7 @@ async function handleUninstall() {
     console.error(`\nUninstall finished with ${failures.length} failed step(s): ${failures.join(", ")}`);
     process.exit(1);
   }
-  console.log("\n✅ opencodex local state removed. Remove the package with: npm uninstall -g @bitkyc08/opencodex");
+  console.log("\n✅ opencodex local state removed. Remove the package with: npm uninstall -g @kiritoko1029/opencodex");
 }
 
 async function handleStatus() {

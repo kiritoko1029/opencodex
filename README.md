@@ -1,11 +1,11 @@
 <h3 align="center">make codex open!</h3>
 <p align="center"><b>Universal provider proxy for OpenAI Codex &amp; Claude Code</b> — use any LLM with Codex CLI, App, SDK, and Claude Code.</p>
-<p align="center"><code>npm install -g @bitkyc08/opencodex</code> · <code>ocx start</code> · <b>localhost:10100</b></p>
+<p align="center"><code>npm install -g @kiritoko1029/opencodex</code> · <code>ocx start</code> · <b>localhost:10100</b></p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@bitkyc08/opencodex"><img src="https://img.shields.io/npm/v/@bitkyc08/opencodex?color=cb3837&label=npm&logo=npm" alt="npm version"></a>
-  <a href="https://github.com/lidge-jun/opencodex/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@bitkyc08/opencodex?color=blue" alt="license"></a>
-  <img src="https://img.shields.io/node/v/@bitkyc08/opencodex?logo=node.js&label=node" alt="node version">
+  <a href="https://www.npmjs.com/package/@kiritoko1029/opencodex"><img src="https://img.shields.io/npm/v/@kiritoko1029/opencodex?color=cb3837&label=npm&logo=npm" alt="npm version"></a>
+  <a href="https://github.com/kiritoko1029/opencodex/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@kiritoko1029/opencodex?color=blue" alt="license"></a>
+  <img src="https://img.shields.io/node/v/@kiritoko1029/opencodex?logo=node.js&label=node" alt="node version">
 </p>
 
 <p align="center">
@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <a href="README.ko.md">한국어</a> · <a href="README.zh-CN.md">简体中文</a> · 📖 <a href="https://lidge-jun.github.io/opencodex/"><b>Full documentation →</b></a>
+  <a href="README.md">English</a> · <a href="README.ko.md">한국어</a> · <a href="README.zh-CN.md">简体中文</a> · 📖 <a href="https://kiritoko1029.github.io/opencodex/"><b>Full documentation →</b></a>
 </p>
 
 <p align="center">
@@ -71,7 +71,7 @@ Requires [Node](https://nodejs.org) 18+. The Bun runtime is bundled automaticall
 ```bash
 # Install (bundles the Bun runtime automatically — only Node 18+ required)
 # Prefer a user-owned Node (nvm/fnm) — avoid `sudo npm install -g …`
-npm install -g @bitkyc08/opencodex
+npm install -g @kiritoko1029/opencodex
 
 # Interactive setup (writes config, injects into Codex, and offers autostart shim install)
 ocx init
@@ -98,15 +98,15 @@ launcher, so you do **not** need to install Bun yourself. If you see a
 dependencies. Reinstall without those flags, allowing bun's install script:
 
 ```bash
-npm install -g --allow-scripts=bun @bitkyc08/opencodex   # no --ignore-scripts, no --omit=optional
+npm install -g --allow-scripts=bun @kiritoko1029/opencodex   # no --ignore-scripts, no --omit=optional
 
 # if the original install used sudo, keep using sudo:
-sudo npm install -g --allow-scripts=bun @bitkyc08/opencodex
+sudo npm install -g --allow-scripts=bun @kiritoko1029/opencodex
 ```
 
 npm's own warning suggests an abbreviated command without the package name —
 that would reinstall the current directory, so always pass
-`@bitkyc08/opencodex` explicitly.
+`@kiritoko1029/opencodex` explicitly.
 
 If you installed with `sudo` into a root-owned prefix, the sudo reinstall above
 unblocks that prefix — but prefer migrating to a user-owned Node (nvm, fnm, or
@@ -229,7 +229,7 @@ next Codex session. opencodex keeps these behaviors:
 - **Log in once, skip the API key.** OAuth support for xAI, Anthropic, and Kimi means you can authenticate with your existing account. Tokens auto-refresh. Or forward your `codex login`, paste an API key, or use `${ENV_VAR}` references — your call.
 - **Works everywhere Codex does.** Injects into Codex CLI, TUI, App, and SDK automatically. Routed models show up in Codex's model picker just like native ones.
 - **History-safe injection.** On local installs the proxy points Codex's own built-in `openai` provider at itself via a single `openai_base_url` line — new threads keep their native provider tag, so ongoing chat history is never remapped and an unclean shutdown can't hide it. (Threads re-tagged by older versions are migrated back once on the first start; remote/LAN binds use a dedicated provider entry instead, since they need an API-key header.)
-- **Delegate to the right model.** Feature up to five routed or native models in Codex's subagent picker from the dashboard or config — route complex tasks to a reasoning model, fast tasks to a cheap one. On the v2 multi-agent surface (GPT-5.6 Sol/Terra) the proxy injects compact delegation guidance: a preferred sub-agent model and effort (`injectionModel` / `injectionEffort`), the featured-model roster with the effort ladder each supports, and the `fork_turns` rules that let cross-model `spawn_agent` calls apply their overrides. Known limitation: when a native parent spawns a routed child, the task body can currently arrive backend-encrypted and be lost ([#92](https://github.com/lidge-jun/opencodex/issues/92)) — use the v1 surface for reliable cross-provider delegation. Want your own wording? Set `injectionPrompt` with `{{model}}` / `{{effort}}` / `{{roster}}` placeholders.
+- **Delegate to the right model.** Feature up to five routed or native models in Codex's subagent picker from the dashboard or config — route complex tasks to a reasoning model, fast tasks to a cheap one. On the v2 multi-agent surface (GPT-5.6 Sol/Terra) the proxy injects compact delegation guidance: a preferred sub-agent model and effort (`injectionModel` / `injectionEffort`), the featured-model roster with the effort ladder each supports, and the `fork_turns` rules that let cross-model `spawn_agent` calls apply their overrides. Known limitation: when a native parent spawns a routed child, the task body can currently arrive backend-encrypted and be lost ([#92](https://github.com/kiritoko1029/opencodex/issues/92)) — use the v1 surface for reliable cross-provider delegation. Want your own wording? Set `injectionPrompt` with `{{model}}` / `{{effort}}` / `{{roster}}` placeholders.
 - **Prepare for preview-gated OpenAI rollouts.** GPT-5.6 Sol/Terra/Luna entries preserve the upstream effort ladders. Direct/Multi use the 372k Codex contract; OpenAI API and OpenRouter use 1.05M metadata when upstream access is available.
 - **Give any model superpowers.** Non-OpenAI models get real web search and image understanding via a `gpt-5.4-mini` sidecar over your ChatGPT login.
 - **Generate images natively.** Codex's standalone `image_gen` tool uses `POST /v1/images/generations` for generation and `POST /v1/images/edits` for edits; it is separate from the hosted Responses `image_generation` tool.
@@ -254,7 +254,7 @@ next Codex session. opencodex keeps these behaviors:
 | Ollama / vLLM / LM Studio (local) | `openai-chat` | key (usually blank) |
 | Any OpenAI-compatible endpoint | `openai-chat` | key |
 
-Plus DeepSeek, Groq, OpenRouter, Together, Fireworks, Cerebras, Mistral, Hugging Face, NVIDIA NIM, MiniMax, Qwen Cloud, and more. See the full list with `ocx init` or in the [provider docs](https://lidge-jun.github.io/opencodex/reference/configuration/).
+Plus DeepSeek, Groq, OpenRouter, Together, Fireworks, Cerebras, Mistral, Hugging Face, NVIDIA NIM, MiniMax, Qwen Cloud, and more. See the full list with `ocx init` or in the [provider docs](https://kiritoko1029.github.io/opencodex/reference/configuration/).
 
 Cursor support is a staged experimental bridge: it appears in `ocx init` and the dashboard Add
 Provider picker as a local config with Cursor's static public model catalog. Live
@@ -309,7 +309,7 @@ Before removing the npm package, clean up local state:
 
 ```bash
 ocx uninstall
-npm uninstall -g @bitkyc08/opencodex
+npm uninstall -g @kiritoko1029/opencodex
 ```
 
 `ocx uninstall` stops the proxy, removes any installed service, removes the Codex shim, restores
@@ -423,11 +423,11 @@ backup support existed, you can also run the explicit recovery command:
 ocx recover-history --legacy-openai
 ```
 
-See the **[Configuration reference](https://lidge-jun.github.io/opencodex/reference/configuration/)** for every field.
+See the **[Configuration reference](https://kiritoko1029.github.io/opencodex/reference/configuration/)** for every field.
 
 ## Documentation
 
-The public docs — install, providers, routing, sidecars, Codex integration, Codex App model picker, and CLI/config reference — are built from [`docs-site/`](./docs-site) and published to **[lidge-jun.github.io/opencodex](https://lidge-jun.github.io/opencodex/)**.
+The public docs — install, providers, routing, sidecars, Codex integration, Codex App model picker, and CLI/config reference — are built from [`docs-site/`](./docs-site) and published to **[kiritoko1029.github.io/opencodex](https://kiritoko1029.github.io/opencodex/)**.
 
 Maintainer source-of-truth notes live under [`structure/`](./structure). Historical investigations remain under [`docs/`](./docs).
 Contributor setup lives in [`CONTRIBUTING.md`](./CONTRIBUTING.md), and security reporting guidance
@@ -436,7 +436,7 @@ lives in [`SECURITY.md`](./SECURITY.md).
 ## Development
 
 ```bash
-git clone https://github.com/lidge-jun/opencodex.git
+git clone https://github.com/kiritoko1029/opencodex.git
 cd opencodex
 bun install
 bun run dev:proxy    # start the proxy API in dev mode

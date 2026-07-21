@@ -1,11 +1,11 @@
 <h3 align="center">make codex open!</h3>
 <p align="center"><b>OpenAI Codex &amp; Claude Code를 위한 범용 프로바이더 프록시</b> — Codex CLI·App·SDK와 Claude Code에서 어떤 LLM이든 사용하세요.</p>
-<p align="center"><code>npm install -g @bitkyc08/opencodex</code> · <code>ocx start</code> · <b>localhost:10100</b></p>
+<p align="center"><code>npm install -g @kiritoko1029/opencodex</code> · <code>ocx start</code> · <b>localhost:10100</b></p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@bitkyc08/opencodex"><img src="https://img.shields.io/npm/v/@bitkyc08/opencodex?color=cb3837&label=npm&logo=npm" alt="npm version"></a>
-  <a href="https://github.com/lidge-jun/opencodex/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@bitkyc08/opencodex?color=blue" alt="license"></a>
-  <img src="https://img.shields.io/node/v/@bitkyc08/opencodex?logo=node.js&label=node" alt="node version">
+  <a href="https://www.npmjs.com/package/@kiritoko1029/opencodex"><img src="https://img.shields.io/npm/v/@kiritoko1029/opencodex?color=cb3837&label=npm&logo=npm" alt="npm version"></a>
+  <a href="https://github.com/kiritoko1029/opencodex/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@kiritoko1029/opencodex?color=blue" alt="license"></a>
+  <img src="https://img.shields.io/node/v/@kiritoko1029/opencodex?logo=node.js&label=node" alt="node version">
 </p>
 
 <p align="center">
@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <b>한국어</b> · <a href="README.zh-CN.md">简体中文</a> · 📖 <a href="https://lidge-jun.github.io/opencodex/ko/"><b>전체 문서 →</b></a>
+  <a href="README.md">English</a> · <b>한국어</b> · <a href="README.zh-CN.md">简体中文</a> · 📖 <a href="https://kiritoko1029.github.io/opencodex/ko/"><b>전체 문서 →</b></a>
 </p>
 
 <p align="center">
@@ -71,7 +71,7 @@ flowchart LR
 ```bash
 # 설치 (Bun 런타임이 자동으로 번들됩니다 — Node 18+ 만 있으면 됩니다)
 # 사용자 소유 Node(nvm/fnm)를 권장합니다 — `sudo npm install -g …`는 피하세요
-npm install -g @bitkyc08/opencodex
+npm install -g @kiritoko1029/opencodex
 
 # 대화형 설정 (config 작성 + Codex 주입 + 자동 시작 shim 설치 선택)
 ocx init
@@ -94,14 +94,14 @@ codex "Write a hello world in Rust"
 opencodex는 Bun 런타임을 의존성으로 번들하고 Node 런처로 실행하므로 Bun을 직접 설치할 필요가 **없습니다**. "bundled Bun runtime is missing" 오류가 보이면 설치 과정에서 lifecycle 스크립트(npm이 `allowScripts`로 bun postinstall을 차단한 경우 포함)나 optional 의존성이 건너뛰어진 경우입니다. bun 설치 스크립트를 허용해서 다시 설치하세요:
 
 ```bash
-npm install -g --allow-scripts=bun @bitkyc08/opencodex   # --ignore-scripts, --omit=optional 없이
+npm install -g --allow-scripts=bun @kiritoko1029/opencodex   # --ignore-scripts, --omit=optional 없이
 
 # 처음에 sudo로 설치했다면 sudo를 유지하세요:
-sudo npm install -g --allow-scripts=bun @bitkyc08/opencodex
+sudo npm install -g --allow-scripts=bun @kiritoko1029/opencodex
 ```
 
 npm 경고가 제안하는 축약 명령에는 패키지 이름이 빠져 있어 현재 디렉터리를
-재설치하게 됩니다. 항상 `@bitkyc08/opencodex`를 명시하세요.
+재설치하게 됩니다. 항상 `@kiritoko1029/opencodex`를 명시하세요.
 
 sudo로 루트 소유 prefix에 설치했다면 위의 sudo 재설치가 해당 prefix를 풀어주지만,
 가능할 때 사용자 소유 Node(nvm, fnm, 사용자 npm prefix)로 옮기는 편이 좋습니다.
@@ -208,7 +208,7 @@ opencodex는 두 가지 동작을 분리해서 유지합니다:
 - **ChatGPT 계정을 안전하게 풀링.** 기존 Codex 스레드는 한 계정에 유지하면서, 새 세션은 쿼터 갱신과 비-PII 요청 라벨과 함께 풀에서 사용량이 낮은 계정을 자동 선택할 수 있습니다.
 - **한 번 로그인하면 API 키는 생략.** xAI, Anthropic, Kimi는 OAuth를 지원하므로 기존 계정으로 인증할 수 있고 토큰은 자동 갱신됩니다. 또는 `codex login`을 forward 하거나, API 키를 붙여넣거나, `${ENV_VAR}` 참조를 쓸 수 있습니다 — 선택은 자유입니다.
 - **Codex가 동작하는 모든 곳에서.** Codex CLI, TUI, App, SDK에 자동으로 주입됩니다. 라우팅된 모델이 네이티브 모델처럼 Codex 모델 선택기에 나타납니다.
-- **알맞은 모델에 위임.** 대시보드나 config에서 최대 5개의 라우팅/네이티브 모델을 Codex 서브에이전트 선택기에 노출해, 복잡한 작업은 reasoning 모델로, 빠른 작업은 저렴한 모델로 보낼 수 있습니다. v2 멀티에이전트 표면(GPT-5.6 Sol/Terra)에서는 프록시가 간결한 위임 가이드를 주입합니다. 선호 서브에이전트 모델·effort(`injectionModel` / `injectionEffort`), 노출된 모델 로스터와 각 모델이 지원하는 effort 사다리, 그리고 크로스모델 `spawn_agent` 오버라이드를 적용하는 `fork_turns` 규칙까지. 알려진 제한: 네이티브 부모가 라우팅 자식을 스폰하면 작업 본문이 백엔드 암호화 상태로 도착해 유실될 수 있습니다([#92](https://github.com/lidge-jun/opencodex/issues/92)) — 안정적인 크로스 프로바이더 위임에는 v1 표면을 쓰세요. 문구를 직접 쓰고 싶다면 `injectionPrompt`에 `{{model}}` / `{{effort}}` / `{{roster}}` 플레이스홀더를 넣으면 됩니다.
+- **알맞은 모델에 위임.** 대시보드나 config에서 최대 5개의 라우팅/네이티브 모델을 Codex 서브에이전트 선택기에 노출해, 복잡한 작업은 reasoning 모델로, 빠른 작업은 저렴한 모델로 보낼 수 있습니다. v2 멀티에이전트 표면(GPT-5.6 Sol/Terra)에서는 프록시가 간결한 위임 가이드를 주입합니다. 선호 서브에이전트 모델·effort(`injectionModel` / `injectionEffort`), 노출된 모델 로스터와 각 모델이 지원하는 effort 사다리, 그리고 크로스모델 `spawn_agent` 오버라이드를 적용하는 `fork_turns` 규칙까지. 알려진 제한: 네이티브 부모가 라우팅 자식을 스폰하면 작업 본문이 백엔드 암호화 상태로 도착해 유실될 수 있습니다([#92](https://github.com/kiritoko1029/opencodex/issues/92)) — 안정적인 크로스 프로바이더 위임에는 v1 표면을 쓰세요. 문구를 직접 쓰고 싶다면 `injectionPrompt`에 `{{model}}` / `{{effort}}` / `{{roster}}` 플레이스홀더를 넣으면 됩니다.
 - **프리뷰 게이트된 OpenAI rollout에 대비.** GPT-5.6 Sol/Terra/Luna의 effort 사다리를 보존합니다. Direct/Multi는 372k Codex 계약을, OpenAI API와 OpenRouter는 1.05M metadata를 사용합니다.
 - **어떤 모델에도 초능력을.** OpenAI가 아닌 모델도 ChatGPT 로그인 위에서 도는 `gpt-5.4-mini` sidecar로 실제 웹 검색과 이미지 이해를 사용합니다.
 - **이미지를 네이티브로 생성.** Codex의 독립형 `image_gen` 도구는 생성할 때 `POST /v1/images/generations`, 편집할 때 `POST /v1/images/edits`를 사용합니다. Responses의 hosted `image_generation` 도구와는 별개입니다.
@@ -232,7 +232,7 @@ opencodex는 두 가지 동작을 분리해서 유지합니다:
 | Ollama / vLLM / LM Studio (로컬) | `openai-chat` | key (보통 비워둠) |
 | 모든 OpenAI 호환 엔드포인트 | `openai-chat` | key |
 
-그 외에 DeepSeek, Groq, OpenRouter, Together, Fireworks, Cerebras, Mistral, Hugging Face, NVIDIA NIM, MiniMax, Qwen Cloud 등이 있습니다. 전체 목록은 `ocx init` 또는 [프로바이더 문서](https://lidge-jun.github.io/opencodex/ko/reference/configuration/)에서 확인하세요.
+그 외에 DeepSeek, Groq, OpenRouter, Together, Fireworks, Cerebras, Mistral, Hugging Face, NVIDIA NIM, MiniMax, Qwen Cloud 등이 있습니다. 전체 목록은 `ocx init` 또는 [프로바이더 문서](https://kiritoko1029.github.io/opencodex/ko/reference/configuration/)에서 확인하세요.
 
 ## CLI
 
@@ -276,7 +276,7 @@ npm 패키지를 지우기 전에 로컬 상태를 먼저 정리하세요:
 
 ```bash
 ocx uninstall
-npm uninstall -g @bitkyc08/opencodex
+npm uninstall -g @kiritoko1029/opencodex
 ```
 
 `ocx uninstall`은 프록시 중지, 설치된 service 제거, Codex shim 제거, Codex config/catalog/history
@@ -386,19 +386,19 @@ OpenAI로 복원하고, 남은 opencodex 유저 스레드도 OpenAI로 eject 하
 ocx recover-history --legacy-openai
 ```
 
-모든 필드에 대한 자세한 내용은 **[설정 레퍼런스](https://lidge-jun.github.io/opencodex/ko/reference/configuration/)** 를 참고하세요.
+모든 필드에 대한 자세한 내용은 **[설정 레퍼런스](https://kiritoko1029.github.io/opencodex/ko/reference/configuration/)** 를 참고하세요.
 
 ## 문서
 
 공개 문서(설치, 프로바이더, 라우팅, sidecar, Codex 통합, Codex App 모델 선택기, CLI/설정 레퍼런스)는 [`docs-site/`](./docs-site)의 Astro 사이트로 빌드되어
-**[lidge-jun.github.io/opencodex](https://lidge-jun.github.io/opencodex/ko/)** 에 게시됩니다.
+**[kiritoko1029.github.io/opencodex](https://kiritoko1029.github.io/opencodex/ko/)** 에 게시됩니다.
 
 유지보수용 source of truth는 [`structure/`](./structure)에, 과거 조사/진단 노트는 [`docs/`](./docs)에 있습니다.
 
 ## 개발
 
 ```bash
-git clone https://github.com/lidge-jun/opencodex.git
+git clone https://github.com/kiritoko1029/opencodex.git
 cd opencodex
 bun install
 bun run dev:proxy    # dev 모드로 프록시 API 시작
@@ -415,7 +415,7 @@ API는 `/healthz`, `/v1/responses`, `POST /v1/images/generations`, `POST /v1/ima
 bun run dev:gui
 ```
 
-**[기여하기](https://lidge-jun.github.io/opencodex/ko/contributing/)** 를 참고하세요.
+**[기여하기](https://kiritoko1029.github.io/opencodex/ko/contributing/)** 를 참고하세요.
 
 ## 면책 조항
 
