@@ -524,6 +524,7 @@ export async function handleManagementAPI(req: Request, url: URL, config: OcxCon
       name, adapter: p.adapter, baseUrl: publicProviderBaseUrl(p.baseUrl), defaultModel: p.defaultModel,
       hasApiKey: !!p.apiKey,
       allowPrivateNetwork: p.allowPrivateNetwork === true,
+      forwardUserAgent: p.forwardUserAgent === true,
       disabled: p.disabled === true,
       codexAccountMode: providerCodexAccountMode(name, p),
     })));
@@ -668,6 +669,13 @@ export async function handleManagementAPI(req: Request, url: URL, config: OcxCon
    if (Object.hasOwn(rawBody, "allowPrivateNetwork")) {
      if (typeof rawBody.allowPrivateNetwork !== "boolean") return jsonResponse({ error: "allowPrivateNetwork must be a boolean" }, 400);
      next.allowPrivateNetwork = rawBody.allowPrivateNetwork;
+     touched = true;
+   }
+
+   if (Object.hasOwn(rawBody, "forwardUserAgent")) {
+     if (typeof rawBody.forwardUserAgent !== "boolean") return jsonResponse({ error: "forwardUserAgent must be a boolean" }, 400);
+     if (rawBody.forwardUserAgent) next.forwardUserAgent = true;
+     else delete next.forwardUserAgent;
      touched = true;
    }
 

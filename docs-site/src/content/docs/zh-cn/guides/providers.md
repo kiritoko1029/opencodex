@@ -188,4 +188,4 @@ Ollama Cloud 是托管（而非本地）的 Ollama，在 `https://ollama.com/v1`
 
 ## 任意 OpenAI 兼容端点
 
-如果某个提供商使用 Chat Completions，`openai-chat` adapter 即可处理它——在仪表盘中选择 **Custom**，或在 `ocx init` 中选择 `custom` 并输入基础 URL。每个提供商字段（`headers`、`noReasoningModels`、`noVisionModels`、`models`……）请参见 [配置参考](/opencodex/zh-cn/reference/configuration/)。
+如果某个提供商使用 Chat Completions，`openai-chat` adapter 即可处理它——在仪表盘中选择 **Custom**，或在 `ocx init` 中选择 `custom` 并输入基础 URL。需要把客户端 `User-Agent` 带到上游时，可设 `forwardUserAgent: true`（默认关闭）。每个提供商字段（`headers`、`forwardUserAgent`、`noReasoningModels`、`noVisionModels`、`models`……）请参见 [配置参考](/opencodex/zh-cn/reference/configuration/)。

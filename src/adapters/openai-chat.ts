@@ -1,10 +1,11 @@
-import type { ProviderAdapter } from "./base";
+import type { IncomingMeta, ProviderAdapter } from "./base";
 import type { AdapterEvent, OcxAssistantMessage, OcxContentPart, OcxMessage, OcxParsedRequest, OcxProviderConfig, OcxTextContent, OcxThinkingContent, OcxToolCall, OcxUsage } from "../types";
 import { isAllowedToolChoice, modelInList, namespacedToolName, resolveToolChoiceWireName, toolAllowedByChoice } from "../types";
 import { mapReasoningEffort } from "../reasoning-effort";
 import { redactSecretString } from "../lib/redact";
 import { contentPartsToText } from "./image";
 import { neutralizeIdentity } from "./identity";
+import { applyForwardUserAgent } from "./forward-user-agent";
 import { buildNonOpenAIToolCatalogNudgeForTools, shouldInjectNonOpenAIToolCatalogNudge } from "./tool-catalog-nudge";
 
 // Providers may opt into stripping one trailing "[...]" group from the wire model id.
@@ -452,7 +453,7 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
 
     formatErrorBody: formatOpenAIChatErrorBody,
 
-    buildRequest(parsed: OcxParsedRequest) {
+    buildRequest(parsed: OcxParsedRequest, incoming?: IncomingMeta) {
       const hasCredential = typeof provider.apiKey === "string" && provider.apiKey.trim().length > 0;
       if ((provider.authMode === "key" || provider.authMode === "oauth") && !provider.keyOptional && !hasCredential) {
         throw new Error(`${provider.adapter} requires a non-empty credential (authMode: ${provider.authMode})`);
@@ -523,6 +524,7 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
       // staticHeaders (e.g. opencode-free x-opencode-client) flow in via derive.ts and
       // never carry Authorization, so keyless providers are unaffected.
       if (hasCredential) headers["Authorization"] = `Bearer ${provider.apiKey}`;
+      applyForwardUserAgent(headers, provider, incoming);
       if (provider.headers) Object.assign(headers, provider.headers);
 
       return { url, method: "POST", headers, body: JSON.stringify(body) };

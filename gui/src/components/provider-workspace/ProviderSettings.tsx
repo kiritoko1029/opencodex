@@ -40,6 +40,7 @@ export default function ProviderSettings({
   const [authMode, setAuthMode] = useState(initialAuth);
   const [note, setNote] = useState(item.note ?? "");
   const [allowPrivateNetwork, setAllowPrivateNetwork] = useState(item.allowPrivateNetwork ?? false);
+  const [forwardUserAgent, setForwardUserAgent] = useState(item.forwardUserAgent ?? false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [baseUrlChoices, setBaseUrlChoices] = useState<CatalogPreset["baseUrlChoices"]>();
@@ -54,9 +55,10 @@ export default function ProviderSettings({
     setAuthMode(String(item.authMode ?? (item.keyOptional ? "local" : "key")));
     setNote(item.note ?? "");
     setAllowPrivateNetwork(item.allowPrivateNetwork ?? false);
+    setForwardUserAgent(item.forwardUserAgent ?? false);
     setMsg(null);
     queueMicrotask(() => setEndpointChoice(matchChoiceId(baseUrlChoices, item.baseUrl)));
-  }, [item.adapter, item.baseUrl, item.defaultModel, item.authMode, item.keyOptional, item.note, item.allowPrivateNetwork, baseUrlChoices]);
+  }, [item.adapter, item.baseUrl, item.defaultModel, item.authMode, item.keyOptional, item.note, item.allowPrivateNetwork, item.forwardUserAgent, baseUrlChoices]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
@@ -89,7 +91,8 @@ export default function ProviderSettings({
     || defaultModel.trim() !== (item.defaultModel ?? "")
     || authMode !== String(item.authMode ?? (item.keyOptional ? "local" : "key"))
     || note.trim() !== (item.note ?? "")
-    || allowPrivateNetwork !== (item.allowPrivateNetwork ?? false);
+    || allowPrivateNetwork !== (item.allowPrivateNetwork ?? false)
+    || forwardUserAgent !== (item.forwardUserAgent ?? false);
 
   useEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
 
@@ -111,6 +114,7 @@ export default function ProviderSettings({
   // Lock plain baseUrl for presets while loading or when there is no picker.
   // On fetch error, keep it editable so allowBaseUrlOverride providers are not trapped.
   const plainBaseUrlLocked = isPreset && choicesStatus !== "error";
+  const canForwardUserAgent = (adapter === "openai-chat" || adapter === "openai-responses") && authMode !== "forward";
 
   const save = async (): Promise<boolean> => {
     if (!onUpdateProvider) { setMsg({ ok: false, text: t("pws.updatesUnavailable") }); return false; }
@@ -119,7 +123,15 @@ export default function ProviderSettings({
       : baseUrl.trim();
     if (!adapter.trim() || !nextBaseUrl) { setMsg({ ok: false, text: t("pws.adapterBaseRequired") }); return false; }
     setSaving(true); setMsg(null);
-    const patch: ProviderUpdatePatch = { adapter: adapter.trim(), baseUrl: nextBaseUrl, defaultModel: defaultModel.trim(), authMode, note: note.trim(), allowPrivateNetwork };
+    const patch: ProviderUpdatePatch = {
+      adapter: adapter.trim(),
+      baseUrl: nextBaseUrl,
+      defaultModel: defaultModel.trim(),
+      authMode,
+      note: note.trim(),
+      allowPrivateNetwork,
+      forwardUserAgent: canForwardUserAgent ? forwardUserAgent : false,
+    };
     const res = await onUpdateProvider(item.name, patch);
     setSaving(false);
     setMsg(res.ok ? { ok: true, text: t("pws.settingsSaved") } : { ok: false, text: res.error || t("prov.saveFailed") });
@@ -139,7 +151,8 @@ export default function ProviderSettings({
   const discard = () => {
     setAdapter(item.adapter); setBaseUrl(item.baseUrl);
     setDefaultModel(item.defaultModel ?? ""); setAuthMode(initialAuth);
-    setNote(item.note ?? ""); setAllowPrivateNetwork(item.allowPrivateNetwork ?? false); setMsg(null);
+    setNote(item.note ?? ""); setAllowPrivateNetwork(item.allowPrivateNetwork ?? false);
+    setForwardUserAgent(item.forwardUserAgent ?? false); setMsg(null);
     setEndpointChoice(matchChoiceId(baseUrlChoices, item.baseUrl));
   };
 
@@ -227,6 +240,15 @@ export default function ProviderSettings({
         <input type="checkbox" checked={allowPrivateNetwork} onChange={e => setAllowPrivateNetwork(e.target.checked)} />
         <span className="pwi-settings-label">{t("pws.allowPrivateNetwork")}</span>
       </label>
+      {canForwardUserAgent && (
+        <label className="pwi-settings-field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <input type="checkbox" checked={forwardUserAgent} onChange={e => setForwardUserAgent(e.target.checked)} />
+          <span className="pwi-settings-label">{t("pws.forwardUserAgent")}</span>
+        </label>
+      )}
+      {canForwardUserAgent && (
+        <p className="muted text-control" style={{ margin: "-4px 0 0", paddingLeft: 24 }}>{t("pws.forwardUserAgentHint")}</p>
+      )}
       {dirty && (
         <div className="pwi-settings-sticky-bar">
           <span className="muted">{t("pws.settingsUnsavedBar")}</span>

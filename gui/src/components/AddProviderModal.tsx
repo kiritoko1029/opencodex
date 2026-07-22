@@ -51,7 +51,7 @@ export default function AddProviderModal({
   );
   const [form, setForm] = useState<FormState | null>(
     initialCustom
-      ? { name: "", adapter: "openai-chat", baseUrl: "", authMode: "key", apiKey: "", defaultModel: "", allowPrivateNetwork: false }
+      ? { name: "", adapter: "openai-chat", baseUrl: "", authMode: "key", apiKey: "", defaultModel: "", allowPrivateNetwork: false, forwardUserAgent: false }
       : null,
   );
   const [saving, setSaving] = useState(false);
@@ -145,6 +145,7 @@ export default function AddProviderModal({
       apiKey: "",
       defaultModel: p.defaultModel ?? "",
       allowPrivateNetwork: false,
+      forwardUserAgent: false,
     });
     setError("");
     setOauthMsg("");
@@ -483,6 +484,15 @@ export default function AddProviderModal({
                 )}
                 {!isReservedForward && (form?.allowPrivateNetwork ?? false) && (
                   <p className="muted text-hint">{t("modal.allowPrivateNetworkHint")}</p>
+                )}
+                {isCustom && (form.adapter === "openai-chat" || form.adapter === "openai-responses") && form.authMode !== "forward" && (
+                  <>
+                    <label className="modal-field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <input type="checkbox" checked={form?.forwardUserAgent ?? false} onChange={e => setForm(f => f ? { ...f, forwardUserAgent: e.target.checked } : f)} />
+                      <span className="muted text-control">{t("modal.forwardUserAgent")}</span>
+                    </label>
+                    <p className="muted text-control" style={{ margin: "-4px 0 0", paddingLeft: 24 }}>{t("modal.forwardUserAgentHint")}</p>
+                  </>
                 )}
               </>}
               {form.authMode === "forward" ? (

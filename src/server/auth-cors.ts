@@ -283,6 +283,7 @@ export function safeConfigDTO(config: OcxConfig): unknown {
       "defaultModel",
       "disabled",
       "allowPrivateNetwork",
+      "forwardUserAgent",
       "authMode",
       "keyOptional",
       "freeTier",

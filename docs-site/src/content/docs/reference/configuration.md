@@ -156,6 +156,7 @@ network. Only do this on trusted networks, and always set a strong `OPENCODEX_AP
 | `modelContextWindows?` | `Record<string,number>` | Model-specific context-window caps. These override `contextWindow` for matching model ids and never raise smaller live metadata. |
 | `modelInputModalities?` | `Record<string,string[]>` | Model-specific catalog input hints such as `["text"]` or `["text", "image"]`. |
 | `headers?` | `Record<string,string>` | Extra upstream headers. Authorization, cookies, API-key headers, embedded newlines, and invalid header names are rejected. |
+| `forwardUserAgent?` | `boolean` | When `true`, `openai-chat` / `openai-responses` (key mode) copy the caller's `User-Agent` to the upstream request. Default off (Bun `fetch` UA). A static `headers` `User-Agent` still wins. |
 | `authMode?` | `"key" \| "forward" \| "oauth"` | How to authenticate (default `key`). See [Providers](/opencodex/guides/providers/#auth-modes). |
 | `codexAccountMode?` | `"pool" \| "direct"` | Only for canonical `openai`; defaults to Pool when omitted. Direct short-circuits pool state. |
 | `refreshPolicy?` | `"proactive" \| "lazy-only" \| "disabled"` | Override this OAuth provider's Token Guardian policy. |

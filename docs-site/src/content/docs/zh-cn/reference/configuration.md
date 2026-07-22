@@ -136,6 +136,7 @@ x-opencodex-api-key: your-secret-token
 | `modelContextWindows?` | `Record<string,number>` | 模型级 context-window cap。匹配模型时优先于 `contextWindow`，且不会抬高更小的实时 metadata。 |
 | `modelInputModalities?` | `Record<string,string[]>` | 模型级目录 input hint，如 `["text"]` 或 `["text", "image"]`。 |
 | `headers?` | `Record<string,string>` | 额外上游 header。Authorization、cookie、API-key header、包含换行的值和无效 header 名称会被拒绝。 |
+| `forwardUserAgent?` | `boolean` | 为 `true` 时，`openai-chat` / `openai-responses`（key 模式）把调用方的 `User-Agent` 带到上游。默认关闭（Bun `fetch` UA）。静态 `headers` 中的 `User-Agent` 仍优先。 |
 | `authMode?` | `"key" \| "forward" \| "oauth"` | 认证方式（默认 `key`）。参见 [Providers](/opencodex/zh-cn/guides/providers/#认证模式)。 |
 | `codexAccountMode?` | `"pool" \| "direct"` | 仅用于 canonical `openai`。省略时默认 Pool；Direct 会绕过池状态。 |
 | `refreshPolicy?` | `"proactive" \| "lazy-only" \| "disabled"` | 覆盖该 OAuth provider 的 Token Guardian 策略。 |

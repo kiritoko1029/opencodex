@@ -211,6 +211,7 @@ Point opencodex at a local OpenAI-compatible server — usually with a blank key
 ## Any OpenAI-compatible endpoint
 
 If a provider speaks Chat Completions, the `openai-chat` adapter handles it — choose **Custom** in the
-dashboard or `custom` in `ocx init` and enter the base URL. See the
+dashboard or `custom` in `ocx init` and enter the base URL. Set `forwardUserAgent: true` to copy the
+caller's `User-Agent` upstream (off by default). See the
 [Configuration reference](/opencodex/reference/configuration/) for every provider field
-(`headers`, `noReasoningModels`, `noVisionModels`, `models`, …).
+(`headers`, `forwardUserAgent`, `noReasoningModels`, `noVisionModels`, `models`, …).

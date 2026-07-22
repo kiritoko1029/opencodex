@@ -2,6 +2,7 @@ import type { IncomingMeta, ProviderAdapter } from "./base";
 import type { AdapterEvent, OcxParsedRequest, OcxProviderConfig } from "../types";
 import { decodeCompactionSummary, SUMMARY_PREFIX } from "../responses/compaction";
 import { OCX_REASONING_PREFIX } from "../responses/reasoning-envelope";
+import { applyForwardUserAgent } from "./forward-user-agent";
 
 // Headers relayed verbatim from the caller in OAuth-passthrough ("forward") mode.
 // Exported so the web-search sidecar reuses the exact same forwarded-auth set for its ChatGPT call.
@@ -442,6 +443,7 @@ export function createResponsesPassthroughAdapter(provider: OcxProviderConfig): 
         const base = provider.baseUrl.replace(/\/v1\/?$/, "");
         url = `${base}/v1/responses`;
         if (provider.apiKey) headers["Authorization"] = `Bearer ${provider.apiKey}`;
+        applyForwardUserAgent(headers, provider, incoming);
         if (provider.headers) Object.assign(headers, provider.headers);
       }
 

@@ -610,6 +610,9 @@ export async function handleClaudeMessages(
     const value = req.headers.get(name);
     if (value) headers.set(name, value);
   }
+  // Preserve caller User-Agent for provider.forwardUserAgent on the internal /v1/responses replay.
+  const userAgent = req.headers.get("user-agent");
+  if (userAgent) headers.set("user-agent", userAgent);
   if (!nativeRoute) {
     // Routed replays need main ChatGPT auth so OpenAI-backed sidecars remain reachable.
     const { getMainAccountToken } = await import("../codex/main-account");

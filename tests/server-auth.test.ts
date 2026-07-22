@@ -797,6 +797,52 @@ describe("server local API auth", () => {
     }
   });
 
+  test("provider PATCH toggles forwardUserAgent and exposes it on /api/config", async () => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(TEST_DIR, { recursive: true });
+    process.env.OPENCODEX_HOME = TEST_DIR;
+    saveConfig(config("127.0.0.1"));
+
+    const server = startServer(0);
+    try {
+      const createRes = await fetch(new URL("/api/providers", server.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "ua-fwd",
+          provider: { adapter: "openai-chat", baseUrl: "https://api.example.com/v1", apiKey: "sk-test" },
+        }),
+      });
+      expect(createRes.status).toBe(200);
+
+      const onRes = await fetch(new URL("/api/providers?name=ua-fwd", server.url), {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ forwardUserAgent: true }),
+      });
+      expect(onRes.status).toBe(200);
+
+      const savedOn = await fetch(new URL("/api/config", server.url)).then(r => r.json()) as {
+        providers: Record<string, { forwardUserAgent?: boolean }>;
+      };
+      expect(savedOn.providers["ua-fwd"].forwardUserAgent).toBe(true);
+
+      const offRes = await fetch(new URL("/api/providers?name=ua-fwd", server.url), {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ forwardUserAgent: false }),
+      });
+      expect(offRes.status).toBe(200);
+
+      const savedOff = await fetch(new URL("/api/config", server.url)).then(r => r.json()) as {
+        providers: Record<string, { forwardUserAgent?: boolean }>;
+      };
+      expect(savedOff.providers["ua-fwd"].forwardUserAgent).toBeUndefined();
+    } finally {
+      await server.stop(true);
+    }
+  });
+
   test("provider PATCH rejects disabling allowPrivateNetwork while baseUrl is private", async () => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
     mkdirSync(TEST_DIR, { recursive: true });

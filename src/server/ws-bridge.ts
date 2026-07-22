@@ -39,6 +39,9 @@ export function selectForwardHeaders(
     const value = headers.get(name);
     if (value) selected.set(name, value);
   }
+  // Preserve caller User-Agent for opt-in provider.forwardUserAgent on custom channels.
+  const userAgent = headers.get("user-agent");
+  if (userAgent) selected.set("user-agent", userAgent);
   if (codexOverride) {
     selected.set("authorization", `Bearer ${codexOverride.accessToken}`);
     selected.set("chatgpt-account-id", codexOverride.chatgptAccountId);

@@ -634,6 +634,11 @@ export interface OcxProviderConfig {
   modelMaxInputTokens?: Record<string, number>;
   headers?: Record<string, string>;
   /**
+   * When true, openai-chat / openai-responses (key mode) copy the caller's User-Agent to the
+   * upstream request. Default off (Bun's fetch UA). Static `headers["User-Agent"]` still wins.
+   */
+  forwardUserAgent?: boolean;
+  /**
    * "key" (default): authenticate upstream with `apiKey`.
    * "forward": relay the caller's incoming auth headers verbatim (OAuth passthrough; gpt only).
    * "oauth": resolve a stored OAuth access token (auto-refreshed) and use it as the Bearer key.

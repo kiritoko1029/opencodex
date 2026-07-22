@@ -6,6 +6,7 @@ export interface ProviderPayloadForm {
   apiKey: string;
   defaultModel: string;
   allowPrivateNetwork?: boolean;
+  forwardUserAgent?: boolean;
 }
 
 export interface ProviderPostPreset {
@@ -33,6 +34,7 @@ export interface ProviderPayload {
   authMode?: "key" | "forward" | "oauth";
   codexAccountMode?: "pool" | "direct";
   allowPrivateNetwork?: boolean;
+  forwardUserAgent?: boolean;
 }
 
 export function buildProviderPayload(form: ProviderPayloadForm): ProviderPayload {
@@ -52,6 +54,9 @@ export function buildProviderPayload(form: ProviderPayloadForm): ProviderPayload
   }
   if (form.allowPrivateNetwork) {
     provider.allowPrivateNetwork = true;
+  }
+  if (form.forwardUserAgent) {
+    provider.forwardUserAgent = true;
   }
 
   return provider;
