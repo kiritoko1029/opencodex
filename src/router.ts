@@ -182,6 +182,7 @@ function routedProviderConfig(providerName: string, provider: OcxProviderConfig)
     // Scalar backfill: a persisted config created before the flag shipped inherits the registry
     // opt-in, while an explicit user `false` keeps overriding registry `true`.
     ...(provider.parallelToolCalls === undefined && registryEntry.parallelToolCalls !== undefined ? { parallelToolCalls: registryEntry.parallelToolCalls } : {}),
+    ...(provider.promptCacheKey === undefined && registryEntry.promptCacheKey !== undefined ? { promptCacheKey: registryEntry.promptCacheKey } : {}),
     ...(modelContextWindows ? { modelContextWindows } : {}),
     ...(modelInputModalities ? { modelInputModalities } : {}),
     ...(modelMaxInputTokens ? { modelMaxInputTokens } : {}),
@@ -208,7 +209,7 @@ function activeProviderEntries(config: OcxConfig): [string, OcxProviderConfig][]
 
 export class NoEnabledOpenAiProviderError extends Error {
   constructor(modelId: string) {
-    super(`No enabled canonical OpenAI provider for model: ${modelId}`);
+    super(`No enabled OpenAI provider for model: ${modelId}. Run 'ocx init' to configure a provider, or check that your config has an enabled 'openai' provider.`);
     this.name = "NoEnabledOpenAiProviderError";
   }
 }
