@@ -163,6 +163,7 @@ x-opencodex-api-key: your-secret-token
 | `modelContextWindows?` | `Record<string,number>` | Лимиты контекстного окна для конкретных моделей. Они перекрывают `contextWindow` для совпадающих id моделей и никогда не повышают меньшие живые метаданные. |
 | `modelInputModalities?` | `Record<string,string[]>` | Подсказки каталога о входных модальностях для конкретных моделей, например `["text"]` или `["text", "image"]`. |
 | `headers?` | `Record<string,string>` | Дополнительные заголовки для вышестоящей стороны. Authorization, cookie, заголовки API-ключей, встроенные переводы строк и недопустимые имена заголовков отклоняются. |
+| `forwardUserAgent?` | `boolean` | Если `true`, адаптеры пользовательских каналов (`openai-chat` / `openai-responses` / `anthropic` / `google` / `azure-openai`) копируют `User-Agent` вызывающей стороны на upstream. По умолчанию выкл. (runtime/protocol UA). Статический `headers` `User-Agent` имеет приоритет. |
 | `openRouterRouting?` | `OpenRouterProviderRouting` | Настройки маршрутизации провайдеров OpenRouter по умолчанию. Поддерживает `order`, `only` и `allowFallbacks`; действует только с каноническим URL OpenRouter и адаптером `openai-chat`. |
 | `modelOpenRouterRouting?` | `Record<string,OpenRouterProviderRouting>` | Настройки для точных id моделей, заменяющие `openRouterRouting`. |
 | `authMode?` | `"key" \| "forward" \| "oauth"` | Способ аутентификации (по умолчанию `key`). См. [Провайдеры](/opencodex/ru/guides/providers/#режимы-аутентификации). |

@@ -156,7 +156,7 @@ network. Only do this on trusted networks, and always set a strong `OPENCODEX_AP
 | `modelContextWindows?` | `Record<string,number>` | Model-specific context-window caps. These override `contextWindow` for matching model ids and never raise smaller live metadata. |
 | `modelInputModalities?` | `Record<string,string[]>` | Model-specific catalog input hints such as `["text"]` or `["text", "image"]`. |
 | `headers?` | `Record<string,string>` | Extra upstream headers. Authorization, cookies, API-key headers, embedded newlines, and invalid header names are rejected. |
-| `forwardUserAgent?` | `boolean` | When `true`, `openai-chat` / `openai-responses` (key mode) copy the caller's `User-Agent` to the upstream request. Default off (Bun `fetch` UA). A static `headers` `User-Agent` still wins. |
+| `forwardUserAgent?` | `boolean` | When `true`, custom-channel adapters (`openai-chat` / `openai-responses` / `anthropic` / `google` / `azure-openai`) copy the caller's `User-Agent` to the upstream request. Default off (runtime/protocol UA). A static `headers` `User-Agent` still wins. |
 | `openRouterRouting?` | `OpenRouterProviderRouting` | Default OpenRouter provider preferences. Supports `order`, `only`, and `allowFallbacks`; valid only with the canonical OpenRouter base URL and `openai-chat` adapter. |
 | `modelOpenRouterRouting?` | `Record<string,OpenRouterProviderRouting>` | Exact model-id overrides for `openRouterRouting`. A matching entry replaces the provider-wide default. |
 | `authMode?` | `"key" \| "forward" \| "oauth"` | How to authenticate (default `key`). See [Providers](/opencodex/guides/providers/#auth-modes). |

@@ -136,7 +136,7 @@ x-opencodex-api-key: your-secret-token
 | `modelContextWindows?` | `Record<string,number>` | 模型级 context-window cap。匹配模型时优先于 `contextWindow`，且不会抬高更小的实时 metadata。 |
 | `modelInputModalities?` | `Record<string,string[]>` | 模型级目录 input hint，如 `["text"]` 或 `["text", "image"]`。 |
 | `headers?` | `Record<string,string>` | 额外上游 header。Authorization、cookie、API-key header、包含换行的值和无效 header 名称会被拒绝。 |
-| `forwardUserAgent?` | `boolean` | 为 `true` 时，`openai-chat` / `openai-responses`（key 模式）把调用方的 `User-Agent` 带到上游。默认关闭（Bun `fetch` UA）。静态 `headers` 中的 `User-Agent` 仍优先。 |
+| `forwardUserAgent?` | `boolean` | 为 `true` 时，自定义渠道适配器（`openai-chat` / `openai-responses` / `anthropic` / `google` / `azure-openai`）把调用方的 `User-Agent` 带到上游。默认关闭（运行时/协议 UA）。静态 `headers` 中的 `User-Agent` 仍优先。 |
 | `openRouterRouting?` | `OpenRouterProviderRouting` | 默认 OpenRouter provider 路由设置。支持 `order`、`only` 和 `allowFallbacks`；仅适用于 canonical OpenRouter URL 和 `openai-chat` adapter。 |
 | `modelOpenRouterRouting?` | `Record<string,OpenRouterProviderRouting>` | 按精确模型 id 覆盖 `openRouterRouting`。 |
 | `authMode?` | `"key" \| "forward" \| "oauth"` | 认证方式（默认 `key`）。参见 [Providers](/opencodex/zh-cn/guides/providers/#认证模式)。 |

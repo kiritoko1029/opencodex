@@ -1,4 +1,5 @@
-import type { AdapterFetchContext, AdapterRequest, ProviderAdapter } from "./base";
+import type { AdapterFetchContext, AdapterRequest, IncomingMeta, ProviderAdapter } from "./base";
+import { applyForwardUserAgent } from "./forward-user-agent";
 import { debugDroppedFrame } from "../lib/debug";
 import { createHash } from "node:crypto";
 import type {
@@ -213,7 +214,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
         }
       : {}),
 
-    async buildRequest(parsed: OcxParsedRequest) {
+    async buildRequest(parsed: OcxParsedRequest, incoming?: IncomingMeta) {
       const { systemInstruction, contents } = messagesToGeminiFormat(parsed);
       const tools = toolsToGeminiFormat(parsed);
 
@@ -238,6 +239,10 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
       const streamParam = parsed.stream ? "?alt=sse" : "";
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (provider.headers) Object.assign(headers, provider.headers);
+      const finish = (request: AdapterRequest): AdapterRequest => {
+        applyForwardUserAgent(request.headers, provider, incoming);
+        return request;
+      };
 
       if (provider.googleMode === "cloud-code-assist") {
         // Google Antigravity (Cloud Code Assist): wrap the flat Gemini body in the CCA envelope.
@@ -293,7 +298,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
         };
         headers["User-Agent"] = ANTIGRAVITY_REQUEST_UA;
         headers["Authorization"] = `Bearer ${token}`;
-        return { url, method: "POST", headers, body: JSON.stringify(envelope) };
+        return finish({ url, method: "POST", headers, body: JSON.stringify(envelope) });
       }
 
       if (provider.googleMode === "vertex") {
@@ -302,7 +307,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
         if (apiKey) {
           const url = `https://aiplatform.googleapis.com/v1/publishers/google/models/${parsed.modelId}:${method}${streamParam}`;
           headers["x-goog-api-key"] = apiKey;
-          return { url, method: "POST", headers, body: JSON.stringify(body) };
+          return finish({ url, method: "POST", headers, body: JSON.stringify(body) });
         }
         const project = provider.project || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
         if (!project) throw new Error("Vertex AI requires a project id (provider.project or GOOGLE_CLOUD_PROJECT/GCLOUD_PROJECT).");
@@ -312,7 +317,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
         const url = `https://${host}/v1/projects/${project}/locations/${location}/publishers/google/models/${parsed.modelId}:${method}${streamParam}`;
         const token = await getVertexAccessToken();
         headers["Authorization"] = `Bearer ${token}`;
-        return { url, method: "POST", headers, body: JSON.stringify(body) };
+        return finish({ url, method: "POST", headers, body: JSON.stringify(body) });
       }
 
       // ai-studio (default): Generative Language API + x-goog-api-key.
@@ -321,7 +326,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
       if (!apiKey) throw new Error("google (AI Studio) requires a non-empty API key");
       headers["x-goog-api-key"] = apiKey;
 
-      return { url, method: "POST", headers, body: JSON.stringify(body) };
+      return finish({ url, method: "POST", headers, body: JSON.stringify(body) });
     },
 
     async *parseStream(response: Response): AsyncGenerator<AdapterEvent> {

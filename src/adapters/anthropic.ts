@@ -1,4 +1,5 @@
 import type { IncomingMeta, ProviderAdapter } from "./base";
+import { applyForwardUserAgent } from "./forward-user-agent";
 import { debugDroppedFrame } from "../lib/debug";
 import type {
   AdapterEvent,
@@ -689,6 +690,7 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
       } else {
         headers["x-api-key"] = provider.apiKey;
       }
+      applyForwardUserAgent(headers, provider, incoming);
       if (provider.headers) Object.assign(headers, provider.headers);
 
       // Prompt caching: native Anthropic supports top-level automatic caching, which

@@ -667,8 +667,10 @@ export interface OcxProviderConfig {
   /** Exact model-id overrides for `openRouterRouting`. Each matching entry replaces the default. */
   modelOpenRouterRouting?: Record<string, OpenRouterProviderRouting>;
   /**
-   * When true, openai-chat / openai-responses (key mode) copy the caller's User-Agent to the
-   * upstream request. Default off (Bun's fetch UA). Static `headers["User-Agent"]` still wins.
+   * When true, copy the caller's User-Agent onto the upstream HTTP request
+   * (openai-chat / openai-responses / anthropic / google / azure-openai).
+   * Default off (Bun's fetch UA, or the adapter's protocol fingerprint).
+   * Static `headers["User-Agent"]` still wins.
    */
   forwardUserAgent?: boolean;
   /**

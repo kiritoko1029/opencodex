@@ -11,8 +11,8 @@ function hasHeaderCaseInsensitive(
 
 /**
  * Opt-in copy of the caller's User-Agent onto the upstream request for custom
- * openai-chat / openai-responses (key) channels. Skips when `provider.headers`
- * already sets User-Agent (any casing) so static config always wins.
+ * provider channels. Skips when `provider.headers` already sets User-Agent
+ * (any casing) so static config always wins.
  */
 export function applyForwardUserAgent(
   headers: Record<string, string>,

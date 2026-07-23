@@ -440,6 +440,7 @@ export function createResponsesPassthroughAdapter(provider: OcxProviderConfig): 
           headers["authorization"] = `Bearer ${override.accessToken}`;
           headers["chatgpt-account-id"] = override.chatgptAccountId;
         }
+        applyForwardUserAgent(headers, provider, incoming);
       } else {
         const base = provider.baseUrl.replace(/\/v1\/?$/, "");
         url = `${base}/v1/responses`;

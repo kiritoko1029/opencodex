@@ -485,7 +485,7 @@ export default function AddProviderModal({
                 {!isReservedForward && (form?.allowPrivateNetwork ?? false) && (
                   <p className="muted text-hint">{t("modal.allowPrivateNetworkHint")}</p>
                 )}
-                {isCustom && (form.adapter === "openai-chat" || form.adapter === "openai-responses") && form.authMode !== "forward" && (
+                {isCustom && form.adapter !== "cursor" && (
                   <>
                     <label className="modal-field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                       <input type="checkbox" checked={form?.forwardUserAgent ?? false} onChange={e => setForm(f => f ? { ...f, forwardUserAgent: e.target.checked } : f)} />

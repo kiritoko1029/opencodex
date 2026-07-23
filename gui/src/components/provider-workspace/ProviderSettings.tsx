@@ -114,7 +114,7 @@ export default function ProviderSettings({
   // Lock plain baseUrl for presets while loading or when there is no picker.
   // On fetch error, keep it editable so allowBaseUrlOverride providers are not trapped.
   const plainBaseUrlLocked = isPreset && choicesStatus !== "error";
-  const canForwardUserAgent = (adapter === "openai-chat" || adapter === "openai-responses") && authMode !== "forward";
+  const canForwardUserAgent = !isPreset && adapter !== "cursor";
 
   const save = async (): Promise<boolean> => {
     if (!onUpdateProvider) { setMsg({ ok: false, text: t("pws.updatesUnavailable") }); return false; }

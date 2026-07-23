@@ -168,8 +168,7 @@ export function headersForCodexAuthContext(headers: Headers, ctx: CodexAuthConte
     const value = headers.get(name);
     if (value) selected.set(name, value);
   }
-  // Preserve caller User-Agent for opt-in provider.forwardUserAgent (openai-chat /
-  // openai-responses key). Forward-mode adapters still write only FORWARD_HEADERS.
+  // Preserve caller User-Agent for opt-in provider.forwardUserAgent on custom channels.
   const userAgent = headers.get("user-agent");
   if (userAgent) selected.set("user-agent", userAgent);
   if (ctx.kind === "pool" || ctx.kind === "main-pool") {
