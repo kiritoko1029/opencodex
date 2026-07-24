@@ -5,10 +5,26 @@ export interface OcxParsedRequest {
   stream: boolean;
   options: OcxRequestOptions;
   _rawBody?: unknown;
+  /** Number of leading raw input items restored from local previous_response_id state. */
+  _replayPrefixLen?: number;
   /** True when the proxy expanded a previous_response_id request into a full input replay. */
   _previousResponseInputExpanded?: boolean;
   /** Provider-private stable Cursor conversation id resolved from the Responses previous_response_id chain. */
   _cursorConversationId?: string;
+  /** Stable upstream client thread identity, used only to derive provider-scoped continuation ids. */
+  _clientThreadId?: string;
+  /**
+   * Optional authenticated tenant/operator namespace for Cursor thread→conversation derivation.
+   * When absent (single-operator local proxy), derivation stays local-scoped.
+   */
+  _cursorIdentityScope?: string;
+  /**
+   * True for helper/shadow/compaction turns that must not append into the main Cursor conversation
+   * derived from the parent thread id.
+   */
+  _cursorIsolateConversation?: boolean;
+  /** Provider-private continuation metadata resolved from the Responses previous_response_id chain. */
+  _providerContinuation?: OcxProviderContinuationState;
   /**
    * The hosted `{type:"web_search", ...}` tool config, stashed when Codex enables web search. Routed
    * (non-OpenAI) providers can't run it server-side, so the proxy re-exposes it as a function tool and
@@ -28,6 +44,12 @@ export interface OcxParsedRequest {
    * (see src/responses/compaction.ts).
    */
   _compactionRequest?: boolean;
+  /**
+   * True when the current request newly introduced a stored compaction summary/marker. Historical
+   * markers restored by previous_response_id expansion were already acknowledged and do not reset
+   * provider-private continuation caches again on every later turn.
+   */
+  _contextCompactionBoundary?: boolean;
 }
 
 export interface OcxContext {
@@ -51,6 +73,8 @@ export interface OcxUserMessage {
 export interface OcxAssistantMessage {
   role: "assistant";
   content: OcxAssistantContentPart[];
+  /** Responses message phase, preserved when replaying translated provider output. */
+  phase?: OcxMessagePhase;
   model?: string;
   timestamp: number;
 }
@@ -69,6 +93,8 @@ export interface OcxToolResultMessage {
   toolNamespace?: string;
   /** Text, or content parts when a tool (e.g. Codex view_image) returns an image in its output. */
   content: string | OcxContentPart[];
+  /** True when the Responses result contained opaque encrypted output Kiro cannot translate. */
+  containsEncryptedContent?: boolean;
   isError: boolean;
   timestamp: number;
 }
@@ -191,9 +217,26 @@ export interface OcxRequestOptions {
   promptCacheKey?: string;
 }
 
+export type OcxMessagePhase = "commentary" | "final_answer";
+
+/**
+ * Provider-private state that must follow a locally expanded `previous_response_id` chain.
+ * Kept out of public Responses output and persisted only in the bounded local continuation cache.
+ */
+export interface OcxProviderContinuationState {
+  cursor?: {
+    conversationId?: string;
+    checkpointUsable?: boolean;
+  };
+  kiro?: {
+    conversationId?: string;
+  };
+  [provider: string]: Record<string, unknown> | undefined;
+}
+
 export type AdapterEvent =
   | { type: "heartbeat" }
-  | { type: "text_delta"; text: string }
+  | { type: "text_delta"; text: string; phase?: OcxMessagePhase }
   | { type: "thinking_delta"; thinking: string }
   // Anthropic extended-thinking round-trip: signature_delta for the current thinking block, and
   // opaque redacted_thinking blocks. Both must be replayed verbatim or tool-use turns 400.
@@ -211,10 +254,35 @@ export type AdapterEvent =
   // the SAME output index, so the activity animates instead of flashing completed instantly.
   | { type: "web_search_call_begin"; id: string }
   | { type: "web_search_call_end"; id: string; queries: string[]; status?: "completed" | "failed"; sources?: OcxUrlCitation[] }
-  | { type: "done"; usage?: OcxUsage; stopReason?: string }
+  | {
+      type: "done";
+      usage?: OcxUsage;
+      stopReason?: string;
+      endTurn?: boolean;
+      providerState?: OcxProviderContinuationState;
+    }
+  | {
+      type: "incomplete";
+      reason: string;
+      message?: string;
+      usage?: OcxUsage;
+      retryable?: boolean;
+      endTurn?: boolean;
+      providerState?: OcxProviderContinuationState;
+    }
   // `usage` carries best-effort partial consumption when a turn dies before a clean done
   // (e.g. cursor upstream 502 mid-stream), so failed requests can log real token counts.
-  | { type: "error"; message: string; usage?: OcxUsage };
+  | {
+      type: "error";
+      message: string;
+      usage?: OcxUsage;
+      /** Authoritative upstream/proxy status when known; avoids message-based classification. */
+      status?: number;
+      /** Responses error type and code when the adapter has a structured provider failure. */
+      errorType?: string;
+      code?: string;
+      retryable?: boolean;
+    };
 
 /**
  * A web source backing a search answer. Surfaced on the search-end event and rendered by the bridge
@@ -392,6 +460,15 @@ export interface OcxConfig {
    */
   fastMode?: boolean;
   /**
+   * Windows SSE passthrough stream shape (#314 mitigation).
+   * "auto" (default): eager bounded relay only on runtimes proven to carry the
+   * Bun#32111 fix (none today → legacy tee). "eager-relay": force the new relay
+   * (accepts #32111 crash risk on Bun 1.3.14). "legacy-tee": pin the tee path.
+   * Persisted in config.json because Windows services do not inherit shell env.
+   * See src/lib/bun-stream-caps.ts.
+   */
+  streamMode?: "auto" | "legacy-tee" | "eager-relay";
+  /**
    * Custom override for the injected multi-agent guidance body (the text inside the
    * <multi_agent_mode> tags). When set, it replaces the built-in prompt on whichever
    * collab surface would have fired; firing gates are unchanged. Placeholders:
@@ -399,6 +476,11 @@ export interface OcxConfig {
    * the resolved sub-agent roster block ("" when nothing resolves).
    */
   injectionPrompt?: string;
+  /**
+   * Proxy-authored multi-agent developer guidance. Undefined/true = enabled for
+   * backward compatibility; false suppresses both v1 and v2 guidance injection.
+   */
+  multiAgentGuidanceEnabled?: boolean;
   /**
    * Global hard ceiling for the reasoning effort of EVERY proxied turn (main agent AND
    * sub-agents). Ladder value "low".."max"; incoming efforts ranking above it are rewritten
@@ -423,15 +505,18 @@ export interface OcxConfig {
   /** 사용자가 대시보드에서 직접 추가한 커스텀 모델 목록. */
   customModels?: OcxCustomModel[];
   /**
-   * Shadow call intercept: redirect Codex Desktop's hard-coded gpt-5.4-mini helper calls
-   * (title generation, commit messages, skill orchestration) to a user-chosen model.
+   * Shadow call intercept: redirect Codex's hard-coded helper calls (title generation,
+   * commit messages, skill orchestration) to a user-chosen model. Default intercepted
+   * source models: gpt-5.4-mini (older clients) and gpt-5.6-luna (Codex 0.145.0+).
    * Opt-in; disabled by default. When enabled, effort is forced to low.
    */
   shadowCallIntercept?: {
-    /** When true, all gpt-5.4-mini* requests are rewritten to the configured model. */
+    /** When true, requests for known shadow/helper source models are rewritten to the configured model. */
     enabled?: boolean;
     /** Replacement model id (e.g. "gpt-5.5"). */
     model?: string;
+    /** Optional override of intercepted source-model prefixes (default: gpt-5.4-mini, gpt-5.6-luna). */
+    sourceModels?: string[];
   };
   /**
    * 3-state multi-agent surface override:
@@ -467,6 +552,8 @@ export interface OcxConfig {
   apiKeys?: Array<{ id: string; name: string; key: string; createdAt: string }>;
   /** Auto-start/sync the proxy from the Codex shim before launching Codex. Default true. */
   codexAutoStart?: boolean;
+  /** Restore an installed shim after a stable external Codex update replaces it. Default true. */
+  codexShimAutoRestore?: boolean;
   /**
    * Compatibility mode: temporarily rewrite Codex resume-history metadata while the proxy is active
    * so Codex App can show old OpenAI chats and opencodex-created exec chats under its default
@@ -520,6 +607,12 @@ export interface OcxComboConfig {
   stickyLimit?: number;
   /** Used when the client omits reasoning.effort. null/omitted leaves the target default unchanged. */
   defaultEffort?: OcxComboDefaultEffort | null;
+  /**
+   * Optional public model name replacing the default `combo/<id>` slug. Bare names
+   * without "/" are allowed (e.g. "deepseek-v4-flash") so the combo can answer to a
+   * mandated model id; exact-match requests route here before any provider resolution.
+   */
+  alias?: string;
 }
 
 /**
@@ -614,9 +707,24 @@ export interface OpenRouterProviderRouting {
   allowFallbacks?: boolean;
 }
 
+export interface ResponsesItemIdRepairConfig {
+  /** Exact `message` item ids that the proxy should rewrite to request-local canonical ids. */
+  message?: string[];
+  /** Exact `reasoning` item ids that the proxy should rewrite to request-local canonical ids. */
+  reasoning?: string[];
+  /** Backfill missing `output_item.done` / terminal snapshot ids from the matching output_index. */
+  repairMissingTerminalIds?: boolean;
+}
+
 export interface OcxProviderConfig {
   adapter: string;
   baseUrl: string;
+  /**
+   * Optional relative resource path for key-auth openai-responses requests. Must start with `/`
+   * and must not include a URL scheme, query string, or fragment. When omitted, the adapter keeps
+   * the legacy `/v1/responses` construction.
+   */
+  responsesPath?: string;
   /**
    * Explicit opt-in for non-registry private-network destinations such as localhost, RFC1918,
    * link-local, or unique-local upstreams. Metadata endpoints remain blocked.
@@ -661,6 +769,13 @@ export interface OcxProviderConfig {
   modelInputModalities?: Record<string, string[]>;
   /** Model-specific max input token limits. Values cap auto_compact_token_limit. */
   modelMaxInputTokens?: Record<string, number>;
+  /**
+   * Provider-wide fallback for chat-completions `max_tokens` when the caller omits
+   * Responses `max_output_tokens`. Adapters still let an explicit request win.
+   */
+  defaultMaxOutputTokens?: number;
+  /** Model-specific fallback output token budgets. Exact/model-pattern entries beat the provider default. */
+  modelMaxOutputTokens?: Record<string, number>;
   headers?: Record<string, string>;
   /** Default provider-routing preferences for models sent through the canonical OpenRouter API. */
   openRouterRouting?: OpenRouterProviderRouting;
@@ -709,6 +824,11 @@ export interface OcxProviderConfig {
   modelReasoningEfforts?: Record<string, string[]>;
   /** Model-specific default Codex reasoning tier; must also be present in the visible tier list. */
   modelDefaultReasoningEfforts?: Record<string, string>;
+  /**
+   * Model-specific Codex reasoning-summary capability. Set false when an OpenAI-compatible
+   * Responses backend rejects Codex summary-delivery fields for that model.
+   */
+  modelSupportsReasoningSummaries?: Record<string, boolean>;
   /** Provider-wide mapping from Codex effort labels to upstream `reasoning_effort` values. */
   reasoningEffortMap?: Record<string, string>;
   /** Model-specific mapping from Codex effort labels to upstream `reasoning_effort` values. */
@@ -738,6 +858,12 @@ export interface OcxProviderConfig {
    * fields. Default off; only enable for providers that document this parameter.
    */
   promptCacheKey?: boolean;
+  /**
+   * Provider-local passthrough SSE repair for broken openai-responses gateways that reuse exact
+   * placeholder message/reasoning ids or omit the terminal id after a stable added event.
+   * Disabled by default; function_call ids and call_id pairing are never rewritten.
+   */
+  responsesItemIdRepair?: ResponsesItemIdRepairConfig;
   /** Model ids whose tool_choice only accepts `auto` or `none`; forced/named choices are downgraded. */
   autoToolChoiceOnlyModels?: string[];
   /** Model ids that expect prior assistant `reasoning_content` to be preserved in chat history. */
@@ -785,23 +911,23 @@ export interface OcxProviderConfig {
   desktopExecutor?: import("./adapters/cursor/native-exec-desktop").DesktopExecutorConfig;
   /**
    * Cursor adapter only: unsafe opt-in escape hatch for Cursor server-driven built-in local
-   * read/write/delete/ls/grep/shell/fetch execution. Defaults to false so remote Cursor messages
-   * cannot bypass Codex approval/sandbox semantics. Explicit MCP and desktop executors remain
-   * controlled by their own opt-in config.
+   * read/write/delete/ls/grep/shell/fetch execution. Prefer `nativeLocalExec: "on"` for new
+   * configs; this legacy boolean remains a server-local explicit opt-in for existing operators.
+   * Defaults to false so remote Cursor messages cannot bypass Codex approval/sandbox semantics.
+   * Explicit MCP and desktop executors remain controlled by their own opt-in config.
    */
   unsafeAllowNativeLocalExec?: boolean;
   /**
    * Cursor adapter only: native local exec policy mode (exec-policy.ts).
-   * "codex-sandbox" (default) allows server-driven local exec only when the
-   * request's instructions/developer text declares the Codex danger-full-access
-   * sandbox (approves the normal full-access flow, denies undeclared requests);
-   * "off" rejects all server-driven local exec; "on" always allows (same as legacy
-   * unsafeAllowNativeLocalExec:true). NOTE: the declaration is CALLER-CONTROLLED prose —
-   * the proxy cannot verify it. Enable "codex-sandbox" only where every client
-   * that can reach the data plane is trusted: the default loopback bind admits
-   * ANY process on this host without auth (including other local users on
-   * multi-user machines), and isAllowedRequestOrigin blocks non-loopback
-   * browser origins by default but not loopback-origin or origin-less callers.
+   * "off" (default) rejects server-driven local exec; "on" always allows it for this
+   * provider and should be used only for a trusted local experiment on a host where every
+   * data-plane caller is trusted. "codex-sandbox" is accepted for backwards compatibility
+   * but is fail-closed like "off": Responses instructions/system/developer text is
+   * caller-controlled prose, and opencodex has no trustworthy per-request attestation that it
+   * reflects a real Codex sandbox state. The default loopback bind admits ANY local process
+   * without auth (including other local users on multi-user machines), and
+   * isAllowedRequestOrigin blocks non-loopback browser origins by default but not
+   * loopback-origin or origin-less callers.
    */
   nativeLocalExec?: "off" | "codex-sandbox" | "on";
 }

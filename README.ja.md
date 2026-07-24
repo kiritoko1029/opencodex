@@ -133,7 +133,7 @@ ocx gui
 
 ```bash
 # Anthropic 経由で Claude Opus を使用
-codex -m "anthropic/claude-opus-4-8" "このスタックトレースを説明して"
+codex -m "anthropic/claude-opus-5" "このスタックトレースを説明して"
 
 # Google 経由で Gemini を使用
 codex -m "google/gemini-3-pro" "auth.ts のユニットテストを書いて"
@@ -233,7 +233,7 @@ opencodex は 2 つの動作を分離して保持します:
 | Ollama / vLLM / LM Studio(ローカル) | `openai-chat` | key(通常は空欄) |
 | 任意の OpenAI 互換エンドポイント | `openai-chat` | key |
 
-このほか DeepSeek、Groq、OpenRouter、Together、Fireworks、Cerebras、Mistral、Hugging Face、NVIDIA NIM、MiniMax、Qwen Cloud などがあります。完全な一覧は `ocx init` または[プロバイダードキュメント](https://kiritoko1029.github.io/opencodex/ja/reference/configuration/)で確認してください。
+このほか DeepSeek、Groq、OpenRouter、Together、Fireworks、Cerebras、Mistral、Hugging Face、NVIDIA NIM、MiniMax、Qwen Cloud、Tencent Cloud Coding Plan、SiliconFlow などがあります。完全な一覧は `ocx init` または[プロバイダードキュメント](https://kiritoko1029.github.io/opencodex/ja/reference/configuration/)で確認してください。
 
 Cursor サポートは段階的な実験的ブリッジです: `ocx init` とダッシュボードの Add Provider ピッカーに Cursor の静的公開モデルカタログを持つローカル config として表示されます。Cursor アクセストークンを設定するとライブ
 HTTP/2 トランスポートが有効になります。Cursor サーバー駆動のネイティブ
@@ -273,10 +273,17 @@ opencodex にはプロキシを自動起動する方法が 2 つあります:
 | **方式** | OS サービスマネージャー(launchd / systemd / schtasks) | `codex` スクリプトランチャーをラップし実際の `codex.exe` は触らない |
 | **タイミング** | ログイン後に常時実行 | オンデマンド — `codex` 起動時に `ocx ensure` を実行 |
 | **再起動** | クラッシュ時に自動再起動 | `codex` 呼び出しごとに 1 回起動 |
-| **Codex 更新** | 影響なし | `ocx codex-shim install` または `ocx update` 時に修復 |
+| **Codex 更新** | 影響なし | 安定して置換されたランチャーは次の通常の `ocx` コマンドで修復 |
 | **削除** | `ocx service uninstall` | `ocx codex-shim uninstall` |
 
 常にプロキシを起動しておくには **service**(開発マシン推奨)、軽くオンデマンドで使うには **shim** を使ってください。
+
+外部の Codex 更新でインストール済み shim が上書きされた場合、次の通常の `ocx` コマンドが
+安定した新しいランチャーをバックアップして shim を復元します。まだ変更中のランチャーには触れず、
+後続のコマンドで再試行します。修復失敗は要求されたコマンドを失敗させず警告だけを表示し、手動の
+代替手段は `ocx codex-shim install` です。自動修復を無効にするには
+`codexShimAutoRestore` を `false` にするか、プロセスで
+`OPENCODEX_CODEX_SHIM_AUTO_RESTORE=0` を設定します。
 shim 自動起動はデフォルトでオンで、GUI ダッシュボードからオフにできます。設定されたプロキシポートが既に使用
 中の場合、`ocx start` が自動的に別の空きローカルポートを選び、Codex の設定もそのポートに更新します。
 

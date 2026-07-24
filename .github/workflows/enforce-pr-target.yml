@@ -195,7 +195,7 @@ jobs:
                   "",
                   `Its title has been prefixed with ${inlineCode(TITLE_PREFIX.trim())}.`,
                   "",
-                  `@${pr.user.login} Please retarget this PR to the \`dev\` branch. All contributions go to \`dev\` first, and \`main\` receives only release promotions. See our [Contributing guide](https://lidge-jun.github.io/opencodex/contributing/) for details. Thanks! 🙏`,
+                  `@${pr.user.login} Please retarget this PR to the \`dev\` branch. All contributions go to \`dev\` first, and \`main\` receives only release promotions. See our [Contributing guide](https://kiritoko1029.github.io/opencodex/contributing/) for details. Thanks! 🙏`,
                   "",
                   draftExplanation
                 ].join("\n")

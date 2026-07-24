@@ -41,6 +41,7 @@ export default function ProviderSettings({
   const [note, setNote] = useState(item.note ?? "");
   const [allowPrivateNetwork, setAllowPrivateNetwork] = useState(item.allowPrivateNetwork ?? false);
   const [forwardUserAgent, setForwardUserAgent] = useState(item.forwardUserAgent ?? false);
+  const [liveModels, setLiveModels] = useState(item.liveModels !== false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [baseUrlChoices, setBaseUrlChoices] = useState<CatalogPreset["baseUrlChoices"]>();
@@ -56,9 +57,10 @@ export default function ProviderSettings({
     setNote(item.note ?? "");
     setAllowPrivateNetwork(item.allowPrivateNetwork ?? false);
     setForwardUserAgent(item.forwardUserAgent ?? false);
+    setLiveModels(item.liveModels !== false);
     setMsg(null);
     queueMicrotask(() => setEndpointChoice(matchChoiceId(baseUrlChoices, item.baseUrl)));
-  }, [item.adapter, item.baseUrl, item.defaultModel, item.authMode, item.keyOptional, item.note, item.allowPrivateNetwork, item.forwardUserAgent, baseUrlChoices]);
+  }, [item.adapter, item.baseUrl, item.defaultModel, item.authMode, item.keyOptional, item.note, item.allowPrivateNetwork, item.forwardUserAgent, item.liveModels, baseUrlChoices]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
@@ -92,7 +94,8 @@ export default function ProviderSettings({
     || authMode !== String(item.authMode ?? (item.keyOptional ? "local" : "key"))
     || note.trim() !== (item.note ?? "")
     || allowPrivateNetwork !== (item.allowPrivateNetwork ?? false)
-    || forwardUserAgent !== (item.forwardUserAgent ?? false);
+    || forwardUserAgent !== (item.forwardUserAgent ?? false)
+    || liveModels !== (item.liveModels !== false);
 
   useEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
 
@@ -130,6 +133,7 @@ export default function ProviderSettings({
       authMode,
       note: note.trim(),
       allowPrivateNetwork,
+      liveModels,
       forwardUserAgent: canForwardUserAgent ? forwardUserAgent : false,
     };
     const res = await onUpdateProvider(item.name, patch);
@@ -152,7 +156,7 @@ export default function ProviderSettings({
     setAdapter(item.adapter); setBaseUrl(item.baseUrl);
     setDefaultModel(item.defaultModel ?? ""); setAuthMode(initialAuth);
     setNote(item.note ?? ""); setAllowPrivateNetwork(item.allowPrivateNetwork ?? false);
-    setForwardUserAgent(item.forwardUserAgent ?? false); setMsg(null);
+    setForwardUserAgent(item.forwardUserAgent ?? false); setLiveModels(item.liveModels !== false); setMsg(null);
     setEndpointChoice(matchChoiceId(baseUrlChoices, item.baseUrl));
   };
 
@@ -239,6 +243,13 @@ export default function ProviderSettings({
       <label className="pwi-settings-field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <input type="checkbox" checked={allowPrivateNetwork} onChange={e => setAllowPrivateNetwork(e.target.checked)} />
         <span className="pwi-settings-label">{t("pws.allowPrivateNetwork")}</span>
+      </label>
+      <label className="pwi-settings-field" style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+        <input type="checkbox" checked={liveModels} onChange={e => setLiveModels(e.target.checked)} />
+        <span>
+          <span className="pwi-settings-label">{t("pws.liveModels")}</span>
+          <span className="muted text-label" style={{ display: "block", marginTop: 2 }}>{t("pws.liveModelsDesc")}</span>
+        </span>
       </label>
       {canForwardUserAgent && (
         <label className="pwi-settings-field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>

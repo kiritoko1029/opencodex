@@ -95,6 +95,19 @@ active account without logging the others out. Identity-less Kimi and Kiro crede
 active slot, while `chatgpt` is always single-slot because Codex pool accounts have a separate ledger.
 Tokens stay in `~/.opencodex/auth.json`; `/api/oauth/accounts` returns masked metadata only.
 
+### Kiro credential import
+
+`ocx login kiro` searches the platform Kiro CLI stores and opens SQLite databases read-only. Two
+environment variables make selection explicit without copying credentials into opencodex:
+
+- `KIROCLI_DB_PATH` selects a nonstandard Kiro CLI SQLite database. The path must already exist;
+  opencodex does not create it or modify the database, WAL, or SHM files.
+- `KIROCLI_TOKEN_KEY` selects the exact `auth_kv` token key when a database contains multiple
+  otherwise ambiguous token rows. A missing selection fails login instead of guessing.
+
+Keep these variables and the selected database private. Do not attach database files or raw login
+diagnostics to bug reports.
+
 ## 3. API-key catalog
 
 opencodex ships 53 built-in presets: 42 key-based, seven OAuth, three local, and the default
@@ -121,6 +134,8 @@ validates the key, and stores it. Notable entries:
 | NVIDIA NIM | `https://integrate.api.nvidia.com/v1` |
 | Z.AI (GLM Coding) | `https://api.z.ai/api/coding/paas/v4` |
 | Qwen Cloud | Token plan (default): `https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1` · Pay as you go: `https://dashscope.aliyuncs.com/compatible-mode/v1` · or Custom |
+| Tencent Cloud Coding Plan | `https://api.lkeap.cloud.tencent.com/coding/v3` |
+| SiliconFlow | `https://api.siliconflow.cn/v1` |
 | Xiaomi MiMo | `https://api.xiaomimimo.com/anthropic` |
 | Kilo | `https://api.kilo.ai/api/gateway` |
 | GitLab Duo | `https://cloud.gitlab.com/ai/v1/proxy/openai/v1` |
@@ -129,6 +144,10 @@ validates the key, and stores it. Notable entries:
 
 Most use the `openai-chat` adapter with a bearer key; a few that expose only an Anthropic-compatible
 endpoint (e.g. **Xiaomi MiMo**) use the `anthropic` adapter (`x-api-key`).
+
+> **Tencent Cloud Coding Plan usage restriction:** Tencent documents this subscription for
+> interactive coding tools only. General API automation, custom application backends, and
+> non-interactive batch use are prohibited and may cause the plan key to be suspended.
 
 ### Multiple API keys
 

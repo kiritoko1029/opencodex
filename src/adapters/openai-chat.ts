@@ -1,7 +1,7 @@
 import type { IncomingMeta, ProviderAdapter } from "./base";
 import type { AdapterEvent, OcxAssistantMessage, OcxContentPart, OcxMessage, OcxParsedRequest, OcxProviderConfig, OcxTextContent, OcxThinkingContent, OcxToolCall, OcxUsage } from "../types";
 import { isAllowedToolChoice, modelInList, namespacedToolName, resolveToolChoiceWireName, toolAllowedByChoice } from "../types";
-import { mapReasoningEffort } from "../reasoning-effort";
+import { mapReasoningEffort, modelRecordValue } from "../reasoning-effort";
 import { redactSecretString } from "../lib/redact";
 import { contentPartsToText } from "./image";
 import { neutralizeIdentity } from "./identity";
@@ -461,9 +461,15 @@ function usageFromOpenAIChat(usage: Record<string, unknown> | undefined): OcxUsa
   };
 }
 
-function thinkingBudgetForEffort(parsed: OcxParsedRequest, reasoningEffort: string): number | undefined {
+function resolveMaxTokens(provider: OcxProviderConfig, parsed: OcxParsedRequest): number | undefined {
+  return parsed.options.maxOutputTokens
+    ?? modelRecordValue(provider.modelMaxOutputTokens, parsed.modelId)
+    ?? provider.defaultMaxOutputTokens;
+}
+
+function thinkingBudgetForEffort(parsed: OcxParsedRequest, reasoningEffort: string, maxOutputTokens?: number): number | undefined {
   if (parsed.options.reasoning === "minimal") return 0;
-  const maxBudget = parsed.options.maxOutputTokens ?? 32768;
+  const maxBudget = maxOutputTokens ?? 32768;
   const fractions: Record<string, number> = {
     low: 0.20,
     medium: 0.50,
@@ -496,6 +502,7 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
         messages,
         stream: parsed.stream,
       };
+      const maxTokens = resolveMaxTokens(provider, parsed);
       const openRouterRouting = resolveOpenRouterRouting(provider, parsed.modelId);
       if (openRouterRouting) body.provider = openRouterProviderPayload(openRouterRouting);
       if (tools) body.tools = tools;
@@ -504,7 +511,7 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
           ? (toolChoice === "none" ? "none" : "auto")
           : toolChoice;
       }
-      if (parsed.options.maxOutputTokens !== undefined) body.max_tokens = parsed.options.maxOutputTokens;
+      if (maxTokens !== undefined) body.max_tokens = maxTokens;
       if (parsed.options.temperature !== undefined && !modelInList(provider.noTemperatureModels, parsed.modelId)) {
         body.temperature = parsed.options.temperature;
       }
@@ -515,7 +522,7 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
       const reasoningEffort = mapReasoningEffort(provider, parsed.modelId, parsed.options.reasoning);
       if (reasoningEffort !== undefined) {
         if (modelInList(provider.thinkingBudgetModels, parsed.modelId)) {
-          const budget = thinkingBudgetForEffort(parsed, reasoningEffort);
+          const budget = thinkingBudgetForEffort(parsed, reasoningEffort, maxTokens);
           if (budget !== undefined) body.thinking_budget = budget;
         } else if (modelInList(provider.thinkingToggleModels, parsed.modelId)) {
           // Vendor thinking-toggle wire (MiMo v2.x, GLM 5/5.1): the mapped value is the toggle
@@ -599,7 +606,7 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
       // being reported as a clean completion (silent truncation). A graceful close is either an
       // explicit `[DONE]` sentinel OR a chunk carrying a non-null `finish_reason` (some
       // OpenAI-compatible providers omit `[DONE]` but do send finish_reason).
-      let sawFinish = false;
+      let finishReason: string | undefined;
 
       // Single per-line handler shared by the streaming loop and the EOF residual-frame flush, so
       // a final frame is parsed identically wherever it lands (no duplicated, drift-prone parsing).
@@ -610,7 +617,12 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
         const payload = line.slice(6).trim();
         if (payload === "[DONE]") {
           yield* flushToolCalls();
-          yield { type: "done", usage: pendingUsage };
+          const stopReason = finishReason === "length"
+            ? "max_tokens"
+            : finishReason === "content_filter"
+              ? "content_filter"
+              : undefined;
+          yield { type: "done", usage: pendingUsage, ...(stopReason ? { stopReason } : {}) };
           return "terminate";
         }
 
@@ -642,9 +654,9 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
         const choices = chunk.choices as { delta?: Record<string, unknown>; finish_reason?: string }[] | undefined;
         if (!choices || choices.length === 0) return "continue";
         // Observe the terminator BEFORE the delta guard: a finish-only chunk (finish_reason set,
-        // no delta) is a graceful close and must mark sawFinish even though we skip it below.
+        // no delta) is a graceful close and must record finishReason even though we skip it below.
         if (typeof choices[0].finish_reason === "string" && choices[0].finish_reason) {
-          sawFinish = true;
+          finishReason = choices[0].finish_reason;
         }
         const delta = choices[0].delta;
         if (delta) {
@@ -715,12 +727,18 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
         // a non-null finish_reason (sawFinish), or a trailing usage chunk (providers emit usage only
         // at end-of-generation). If NONE of those were seen, the stream was cut mid-flight — fail
         // closed so the bridge emits a classified response.failed rather than a silent truncation.
+        const sawFinish = finishReason !== undefined;
         if (!sawFinish && pendingUsage === undefined) {
           yield { type: "error", message: "upstream stream ended without a terminal signal ([DONE] or finish_reason) — possible truncation" };
           return;
         }
         // Graceful close that omitted [DONE] but delivered finish_reason and/or final usage.
-        yield { type: "done", usage: pendingUsage };
+        const stopReason = finishReason === "length"
+          ? "max_tokens"
+          : finishReason === "content_filter"
+            ? "content_filter"
+            : undefined;
+        yield { type: "done", usage: pendingUsage, ...(stopReason ? { stopReason } : {}) };
       } finally {
         reader.releaseLock();
       }

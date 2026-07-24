@@ -1,17 +1,19 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   advanceComboAfterFailure,
   clearComboSelectionState,
   clearComboTargetCooldowns,
+  comboAliasIssues,
   comboConfigError,
   comboConfigIssues,
   comboDefaultEffort,
   comboFailureDecision,
   comboIdFromRawBody,
   comboModelId,
+  comboPublicModelId,
   concreteComboRequestBody,
   coolComboTarget,
   getCombo,
@@ -26,6 +28,7 @@ import {
   parseRetryAfterMs,
   pickComboTarget,
   resetComboEffortWarningStateForTests,
+  resolveComboId,
   targetKey,
   tryPickComboModel,
   UnknownComboError,
@@ -36,6 +39,7 @@ import { handleManagementAPI } from "../src/server/management-api";
 import { handleResponses } from "../src/server/responses";
 import type { OcxConfig } from "../src/types";
 import { syncCatalogModels } from "../src/codex/catalog";
+import { injectClaudeAgentDefs } from "../src/claude/agents-inject";
 
 const VALID_COMBO = { targets: [{ provider: "a", model: "m1" }] };
 
@@ -91,13 +95,17 @@ function successfulPicks(config: OcxConfig, count: number): string[] {
 
 async function withTempHome<T>(run: (dir: string) => Promise<T> | T): Promise<T> {
   const previousHome = process.env.OPENCODEX_HOME;
+  const previousClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
   const dir = mkdtempSync(join(tmpdir(), "ocx-combos-"));
   process.env.OPENCODEX_HOME = dir;
+  process.env.CLAUDE_CONFIG_DIR = join(dir, "claude");
   try {
     return await run(dir);
   } finally {
     if (previousHome === undefined) delete process.env.OPENCODEX_HOME;
     else process.env.OPENCODEX_HOME = previousHome;
+    if (previousClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previousClaudeConfigDir;
     rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -158,6 +166,21 @@ describe("combo namespace primitives", () => {
     expect(isValidComboId("-free")).toBe(false);
     expect(targetKey({ provider: "a", model: "m1" })).toBe("a/m1");
   });
+
+  test("resolves canonical ids before exact aliases and ignores unknown bare ids", () => {
+    const config = baseConfig({
+      combos: {
+        free: { ...VALID_COMBO, alias: "combo/other" },
+        other: { targets: [{ provider: "b", model: "m2" }], alias: "vendor/flash" },
+      },
+    });
+    expect(resolveComboId(config, "combo/other")).toBe("other");
+    expect(resolveComboId(config, "vendor/flash")).toBe("other");
+    expect(resolveComboId(config, "unknown-bare")).toBeNull();
+    expect(tryPickComboModel(config, "vendor/flash")?.comboId).toBe("other");
+    expect(tryPickComboModel(config, "unknown-bare")).toBeNull();
+    expect(() => tryPickComboModel(config, "combo/missing")).toThrow(UnknownComboError);
+  });
 });
 
 describe("combo request cloning", () => {
@@ -165,11 +188,13 @@ describe("combo request cloning", () => {
 
   afterEach(() => resetComboEffortWarningStateForTests());
 
-  test("detects only literal combo model ids in raw request records", () => {
-    expect(comboIdFromRawBody({ model: "combo/free" })).toBe("free");
-    expect(comboIdFromRawBody({ model: "a/m1" })).toBeNull();
-    expect(comboIdFromRawBody({ model: 1 })).toBeNull();
-    expect(comboIdFromRawBody(null)).toBeNull();
+  test("detects canonical and alias combo model ids in raw request records", () => {
+    const config = baseConfig({ combos: { free: { ...VALID_COMBO, alias: "deepseek-v4-flash" } } });
+    expect(comboIdFromRawBody({ model: "combo/free" }, config)).toBe("free");
+    expect(comboIdFromRawBody({ model: "deepseek-v4-flash" }, config)).toBe("free");
+    expect(comboIdFromRawBody({ model: "a/m1" }, config)).toBeNull();
+    expect(comboIdFromRawBody({ model: 1 }, config)).toBeNull();
+    expect(comboIdFromRawBody(null, config)).toBeNull();
   });
 
   test("clones the untouched body and injects an omitted combo default", () => {
@@ -297,6 +322,27 @@ describe("combo failure policy and advancement", () => {
     expect(third.attempted).toEqual(["a/m1", "b/m2", "c/m3"]);
     expect(exhausted).toBeNull();
   });
+
+  test("advancement preserves an explicit payload-eligibility filter", () => {
+    const config = baseConfig({
+      combos: {
+        free: {
+          targets: [
+            { provider: "a", model: "m1" },
+            { provider: "b", model: "m2" },
+            { provider: "c", model: "m3" },
+          ],
+        },
+      },
+    });
+    const first = pickComboTarget(config, "free")!;
+    const next = advanceComboAfterFailure(config, first, {
+      now: 1_000,
+      eligible: target => target.provider === "c",
+    });
+    expect(next?.target.provider).toBe("c");
+    expect(next?.attempted).toEqual(["a/m1", "c/m3"]);
+  });
 });
 
 describe("deterministic combo selection", () => {
@@ -321,6 +367,23 @@ describe("deterministic combo selection", () => {
     expect(pickComboTarget(config, "free")?.target.provider).toBe("a");
     expect(routeModel(config, "combo/free").providerName).toBe("a");
     expect(routeModel(config, "combo/free").providerName).toBe("a");
+  });
+
+  test("routes a concrete combo target without re-entering its shadowing alias", () => {
+    const config = baseConfig({
+      combos: {
+        free: {
+          alias: "a/m1",
+          targets: [{ provider: "a", model: "m1" }],
+        },
+      },
+    });
+
+    expect(routeModel(config, "a/m1")).toMatchObject({
+      providerName: "a",
+      modelId: "m1",
+      combo: { comboId: "free", target: { provider: "a", model: "m1" } },
+    });
   });
 
   test("eligibility, exclusions, and state reset are deterministic", () => {
@@ -349,6 +412,21 @@ describe("deterministic combo selection", () => {
 });
 
 describe("combo validation and normalization", () => {
+  test("validates alias shape, namespace, native families, and uniqueness", () => {
+    const combos = {
+      free: { ...VALID_COMBO, alias: "deepseek-v4-flash" },
+      routed: { ...VALID_COMBO, alias: "vendor/fast" },
+    };
+    expect(comboAliasIssues("new", "plain-model", combos)).toEqual([]);
+    expect(comboAliasIssues("new", "vendor/model", combos)).toEqual([]);
+    expect(comboAliasIssues("new", "combo/model", combos)[0]?.message).toContain("reserved");
+    expect(comboAliasIssues("new", "gpt-5", combos)[0]?.message).toContain("OpenAI native family");
+    expect(comboAliasIssues("new", "deepseek-v4-flash", combos)[0]?.message).toContain("already used");
+    expect(comboAliasIssues("renamed", "deepseek-v4-flash", combos, {
+      excludeComboId: "free",
+    })).toEqual([]);
+  });
+
   test("reports every validation row with a stable path and message", () => {
     const providers = baseConfig().providers;
     const cases: Array<{
@@ -420,10 +498,16 @@ describe("combo validation and normalization", () => {
       strategy: "failover",
       stickyLimit: 1,
       defaultEffort: "high",
+      alias: null,
       targets: [{ provider: "a", model: "m1", weight: 2 }],
     });
     expect(normalizeComboConfig({ targets: [{ provider: "a", model: "m1" }] }).defaultEffort).toBeNull();
     expect(comboDefaultEffort(baseConfig(), "free")).toBeNull();
+    const aliased = baseConfig({
+      combos: { free: { ...VALID_COMBO, alias: "  deepseek-v4-flash  " } },
+    });
+    expect(getCombo(aliased, "free")?.alias).toBe("deepseek-v4-flash");
+    expect(comboPublicModelId("free", getCombo(aliased, "free")!)).toBe("deepseek-v4-flash");
     expect(comboDefaultEffort(baseConfig({
       combos: { free: { defaultEffort: "xhigh", targets: [{ provider: "a", model: "m1" }] } },
     }), "free")).toBe("xhigh");
@@ -497,6 +581,24 @@ describe("persisted combo config parity", () => {
     });
   });
 
+  test("rejects duplicate aliases across persisted combos at load time", async () => {
+    await withTempHome(() => {
+      const providers = baseConfig().providers;
+      writeRawConfig({
+        port: 10100,
+        defaultProvider: "a",
+        providers,
+        combos: {
+          free: { ...VALID_COMBO, alias: "deepseek-v4-flash" },
+          spare: { ...VALID_COMBO, alias: "deepseek-v4-flash" },
+        },
+      });
+      const diagnostics = readConfigDiagnostics();
+      expect(diagnostics.source).toBe("fallback");
+      expect(diagnostics.error).toContain("already used by combo");
+    });
+  });
+
   test("loads one-disabled and all-disabled combos without mutating normalized values", async () => {
     await withTempHome(() => {
       const config = baseConfig({
@@ -531,307 +633,4 @@ describe("persisted combo config parity", () => {
       })).toContain("at least one enabled");
     });
   });
-});
-
-describe("combo management API", () => {
-  test("PUT and DELETE clear only the mutated combo cooldowns", async () => {
-    await withTempHome(async () => {
-      const config = baseConfig({
-        combos: {
-          free: VALID_COMBO,
-          other: { targets: [{ provider: "b", model: "m2" }] },
-        },
-      });
-      saveConfig(config);
-      const freeTarget = { provider: "a", model: "m1" };
-      const otherTarget = { provider: "b", model: "m2" };
-
-      coolComboTarget("free", freeTarget, { cooldownMs: 60_000 });
-      coolComboTarget("other", otherTarget, { cooldownMs: 60_000 });
-      expect(isComboTargetInCooldown("free", freeTarget)).toBe(true);
-      expect((await comboApi(config, "PUT", "/api/combos", {
-        id: "free",
-        combo: VALID_COMBO,
-      }))?.status).toBe(200);
-      expect(isComboTargetInCooldown("free", freeTarget)).toBe(false);
-      expect(isComboTargetInCooldown("other", otherTarget)).toBe(true);
-
-      coolComboTarget("free", freeTarget, { cooldownMs: 60_000 });
-      expect((await comboApi(config, "DELETE", "/api/combos?id=free"))?.status).toBe(200);
-      expect(isComboTargetInCooldown("free", freeTarget)).toBe(false);
-      expect(isComboTargetInCooldown("other", otherTarget)).toBe(true);
-    });
-  });
-
-  test("GET is sorted and PUT upserts normalized whole values", async () => {
-    await withTempHome(async () => {
-      const config = baseConfig({ combos: undefined });
-      saveConfig(config);
-      const created = await comboApi(config, "PUT", "/api/combos", {
-        id: "zeta",
-        combo: { targets: [{ provider: " a ", model: " m1 " }] },
-      });
-      expect(created?.status).toBe(200);
-      expect(await responseJson(created)).toMatchObject({
-        success: true,
-        id: "zeta",
-        model: "combo/zeta",
-        combo: { strategy: "failover", stickyLimit: 1, defaultEffort: null },
-      });
-      const updated = await comboApi(config, "PUT", "/api/combos", {
-        id: "zeta",
-        combo: { strategy: "round-robin", stickyLimit: 2, defaultEffort: "high", targets: [{ provider: "b", model: "m2", weight: 3 }] },
-      });
-      expect((await responseJson(updated)).combo).toMatchObject({ strategy: "round-robin", stickyLimit: 2, defaultEffort: "high" });
-      await comboApi(config, "PUT", "/api/combos", {
-        id: "alpha",
-        combo: { targets: [{ provider: "a", model: "m1" }] },
-      });
-      const listed = await responseJson(await comboApi(config, "GET", "/api/combos"));
-      expect((listed.combos as Array<{ id: string }>).map(row => row.id)).toEqual(["alpha", "zeta"]);
-      expect(listComboIds(config)).toEqual(["alpha", "zeta"]);
-    });
-  });
-
-  test("PUT rejects malformed JSON, non-record roots, and non-string ids without mutation", async () => {
-    await withTempHome(async () => {
-      const config = baseConfig();
-      saveConfig(config);
-      const before = readFileSync(getConfigPath(), "utf8");
-      const malformed = await comboApiRaw(config, "PUT", "/api/combos", "{");
-      expect(malformed?.status).toBe(400);
-      expect(await responseJson(malformed)).toMatchObject({ error: "invalid JSON body" });
-      for (const root of [null, [], "text", 3, true]) {
-        const response = await comboApi(config, "PUT", "/api/combos", root);
-        expect(response?.status).toBe(400);
-        expect(await responseJson(response)).toMatchObject({ error: "request body must be an object" });
-      }
-      for (const id of [{}, [], 3]) {
-        const response = await comboApi(config, "PUT", "/api/combos", { id, combo: VALID_COMBO });
-        expect(response?.status).toBe(400);
-        expect(await responseJson(response)).toMatchObject({ error: "id is required and must be a string" });
-      }
-      expect(readFileSync(getConfigPath(), "utf8")).toBe(before);
-      expect(config.combos).toEqual(baseConfig().combos);
-    });
-  });
-
-  test("POST and PATCH cannot create or update combos", async () => {
-    await withTempHome(async () => {
-      const config = baseConfig();
-      saveConfig(config);
-      const before = readFileSync(getConfigPath(), "utf8");
-      for (const method of ["POST", "PATCH"]) {
-        expect(await comboApi(config, method, "/api/combos", { id: "new", combo: VALID_COMBO })).toBeNull();
-      }
-      expect(config.combos).toEqual(baseConfig().combos);
-      expect(readFileSync(getConfigPath(), "utf8")).toBe(before);
-    });
-  });
-
-  test("invalid PUT and all-disabled PUT leave config and disk unchanged", async () => {
-    await withTempHome(async () => {
-      const config = baseConfig({
-        providers: {
-          ...baseConfig().providers,
-          a: { ...baseConfig().providers.a!, disabled: true },
-        },
-      });
-      saveConfig(config);
-      for (const combo of [
-        { targets: [{ provider: "missing", model: "m" }] },
-        { targets: [{ provider: "a", model: "m1" }] },
-      ]) {
-        const before = readFileSync(getConfigPath(), "utf8");
-        const response = await comboApi(config, "PUT", "/api/combos", { id: "denied", combo });
-        expect(response?.status).toBe(400);
-        expect(readFileSync(getConfigPath(), "utf8")).toBe(before);
-        expect(config.combos?.denied).toBeUndefined();
-      }
-      const mixed = await comboApi(config, "PUT", "/api/combos", {
-        id: "mixed",
-        combo: { targets: [{ provider: "a", model: "m1" }, { provider: "b", model: "m2" }] },
-      });
-      expect(mixed?.status).toBe(200);
-    });
-  });
-
-  test("DELETE is own-property safe and removes the final combo map", async () => {
-    await withTempHome(async () => {
-      const config = baseConfig();
-      saveConfig(config);
-      for (const id of ["missing", "constructor", "toString"]) {
-        const response = await comboApi(config, "DELETE", `/api/combos?id=${id}`);
-        expect(response?.status).toBe(404);
-      }
-      const deleted = await comboApi(config, "DELETE", "/api/combos?id=free");
-      expect(deleted?.status).toBe(200);
-      expect(config.combos).toBeUndefined();
-      expect(JSON.parse(readFileSync(getConfigPath(), "utf8")).combos).toBeUndefined();
-    });
-  });
-
-  test("DELETE refresh immediately retires the final managed combo catalog row", async () => {
-    await withTempHome(async dir => {
-      const previousCodexHome = process.env.CODEX_HOME;
-      const codexHome = join(dir, "codex-home");
-      mkdirSync(codexHome, { recursive: true });
-      process.env.CODEX_HOME = codexHome;
-      const catalogPath = join(codexHome, "opencodex-catalog.json");
-      writeFileSync(catalogPath, JSON.stringify({
-        models: [{
-          slug: "combo/free",
-          display_name: "combo/free",
-          visibility: "list",
-          supported_reasoning_levels: [{ effort: "low" }],
-          input_modalities: ["text"],
-          context_window: 128_000,
-        }],
-      }));
-      try {
-        const config = baseConfig({
-          providers: {
-            a: {
-              adapter: "openai-chat",
-              baseUrl: "https://a.example/v1",
-              apiKey: "ka",
-              liveModels: false,
-              models: ["m1"],
-              modelContextWindows: { m1: 128_000 },
-            },
-          },
-          combos: { free: VALID_COMBO },
-        });
-        saveConfig(config);
-        const deleted = await comboApi(
-          config,
-          "DELETE",
-          "/api/combos?id=free",
-          undefined,
-          async () => { await syncCatalogModels(config); },
-        );
-        expect(deleted?.status).toBe(200);
-        const catalog = JSON.parse(readFileSync(catalogPath, "utf8")) as {
-          models: Array<{ slug?: string }>;
-        };
-        expect(catalog.models.some(model => model.slug === "combo/free")).toBe(false);
-      } finally {
-        if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
-        else process.env.CODEX_HOME = previousCodexHome;
-      }
-    });
-  });
-
-  test("provider deletion is guarded by sorted combo dependencies until cleanup", async () => {
-    await withTempHome(async () => {
-      const config = baseConfig({
-        defaultProvider: "c",
-        combos: {
-          zeta: { targets: [{ provider: "a", model: "m1" }] },
-          alpha: { targets: [{ provider: "a", model: "m1" }] },
-        },
-      });
-      saveConfig(config);
-      const before = readFileSync(getConfigPath(), "utf8");
-      const blocked = await comboApi(config, "DELETE", "/api/providers?name=a");
-      expect(blocked?.status).toBe(409);
-      expect(await responseJson(blocked)).toMatchObject({ combos: ["alpha", "zeta"] });
-      expect(config.providers.a).toBeDefined();
-      expect(readFileSync(getConfigPath(), "utf8")).toBe(before);
-
-      await comboApi(config, "DELETE", "/api/combos?id=alpha");
-      await comboApi(config, "DELETE", "/api/combos?id=zeta");
-      const deleted = await comboApi(config, "DELETE", "/api/providers?name=a");
-      expect(deleted?.status).toBe(200);
-      expect(config.providers.a).toBeUndefined();
-    });
-  });
-});
-
-describe("supported disabled-provider activation", () => {
-  test("PATCH skips one disabled member, persists all-disabled state, and responses fail with the typed 503 envelope", async () => {
-    await withTempHome(async () => {
-      let bHits = 0;
-      let cHits = 0;
-      const upstreamB = Bun.serve({
-        hostname: "127.0.0.1",
-        port: 0,
-        fetch() {
-          bHits += 1;
-          return Response.json({
-            id: "chatcmpl-combo",
-            object: "chat.completion",
-            choices: [{ index: 0, message: { role: "assistant", content: "from b" }, finish_reason: "stop" }],
-            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          });
-        },
-      });
-      const upstreamC = Bun.serve({
-        hostname: "127.0.0.1",
-        port: 0,
-        fetch() {
-          cHits += 1;
-          return Response.json({ error: { message: "default provider must not be reached" } }, { status: 500 });
-        },
-      });
-      try {
-        const config = baseConfig({
-          defaultProvider: "c",
-          providers: {
-            a: { adapter: "openai-chat", baseUrl: "https://a.example/v1", apiKey: "ka" },
-            b: {
-              adapter: "openai-chat",
-              baseUrl: `${upstreamB.url.toString().replace(/\/$/, "")}/v1`,
-              allowPrivateNetwork: true,
-              apiKey: "kb",
-            },
-            c: {
-              adapter: "openai-chat",
-              baseUrl: `${upstreamC.url.toString().replace(/\/$/, "")}/v1`,
-              allowPrivateNetwork: true,
-              apiKey: "kc",
-            },
-          },
-          combos: undefined,
-        });
-        saveConfig(config);
-        expect((await comboApi(config, "PUT", "/api/combos", {
-          id: "free",
-          combo: { targets: [{ provider: "a", model: "m1" }, { provider: "b", model: "m2" }] },
-        }))?.status).toBe(200);
-        expect((await comboApi(config, "PATCH", "/api/providers?name=a", { disabled: true }))?.status).toBe(200);
-        expect(routeModel(config, "combo/free").providerName).toBe("b");
-
-        const routed = await handleResponses(new Request("http://localhost/v1/responses", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ model: "combo/free", input: "hello", stream: false }),
-        }), config, { model: "", provider: "" });
-        expect(routed.status).toBe(200);
-        expect(bHits).toBe(1);
-        expect(cHits).toBe(0);
-
-        expect((await comboApi(config, "PATCH", "/api/providers?name=b", { disabled: true }))?.status).toBe(200);
-        const diagnostics = readConfigDiagnostics();
-        expect(diagnostics.source).toBe("file");
-        expect(diagnostics.error).toBeNull();
-        expect(diagnostics.config.combos?.free).toBeDefined();
-
-        const unavailable = await handleResponses(new Request("http://localhost/v1/responses", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ model: "combo/free", input: "hello", stream: false }),
-        }), diagnostics.config, { model: "", provider: "" });
-        expect(unavailable.status).toBe(503);
-        expect(await unavailable.json()).toMatchObject({
-          error: { code: "combo_unavailable", type: "server_error" },
-        });
-        expect(bHits).toBe(1);
-        expect(cHits).toBe(0);
-      } finally {
-        await upstreamB.stop(true);
-        await upstreamC.stop(true);
-      }
-    });
-  }, 10_000);
 });

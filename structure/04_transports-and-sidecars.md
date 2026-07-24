@@ -17,6 +17,30 @@ within their route; neither route falls through to the other. See
 and before the `/v1/*` guard. Unknown `/v1/*` paths return JSON 404 errors instead of falling through
 to GUI static serving.
 
+### Passthrough SSE stream shapes (#314)
+
+Native passthrough SSE has TWO shapes, selected per request in
+`src/server/responses/core.ts`:
+
+- **Default: tee + background inspection.** `upstreamResponse.body.tee()` sends
+  branch[0] to the client (pure native relay on win32 without item-id repair —
+  the Bun#32111 crash workaround; a JS relay elsewhere) while branch[1] is
+  drained eagerly by `consumeForInspection`/`consumeForResponseLogMetadata`
+  for terminal-outcome recording, quota, the passthrough continuation cache,
+  and request logs. This is the only shape on the bundled Bun 1.3.14.
+- **Gated: eager bounded relay** (`src/server/relay-eager.ts`). win32-no-repair
+  only, armed by `decideEagerRelay(config.streamMode)` from
+  `src/lib/bun-stream-caps.ts` — default-on only for runtimes proven to carry
+  the Bun#32111 fix (`MIN_FIXED_BUN_VERSION`, null until a bundle bump), or by
+  explicit `streamMode: "eager-relay"` opt-in. One eager reader + byte-bounded
+  client queue + post-cancel bounded discard-drain replaces the tee, preserving
+  the full inspection side-effect set (shared `createSseInspector` factory in
+  `relay.ts`) including the #44 late-terminal semantics.
+
+The two-shape contract is mirror-commented in `src/server/index.ts` and
+source-invariant-tested by `tests/passthrough-abort.test.ts`; keep both in
+lockstep with any `core.ts` passthrough change.
+
 ## Standalone Images
 
 Codex's local `image_gen.imagegen` tool makes a second Images request after the model calls it:
@@ -31,6 +55,22 @@ existing account-health state. Unknown Images subpaths still reach the JSON `/v1
 
 On non-loopback binds, data-plane authentication and origin policy cover both Images routes just as
 they cover `/v1/responses`; clients must send the configured `x-opencodex-api-key`.
+
+## Cursor Native Exec
+
+Cursor's experimental live transport can receive server-driven local read/write/delete/ls/grep,
+shell, and fetch exec frames. These frames are denied by default because they bypass Codex's normal
+approval and sandbox path. `nativeLocalExec: "on"` is the explicit config-owner opt-in for trusted
+local experiments; `off` and the backwards-compatible `codex-sandbox` spelling both fail closed.
+MCP, screen recording, and computer-use stay on their separate explicit executor/MCP config paths.
+
+[Decision Log]
+- 목적과 의도: prevent caller-controlled Responses text from authorizing Cursor native local shell, filesystem, or fetch execution.
+- 기존 구현 및 제약 조건: the adapter preserved top-level `instructions`, system messages, and developer messages, then treated a `sandbox_mode ... danger-full-access` prose marker as an exec allow signal in `codex-sandbox` mode.
+- 검토한 주요 대안: keep marker-based authorization, require a future trustworthy attestation channel, or restrict authorization to server-local config.
+- 선택한 방식: keep marker detection only as diagnostic/context and make `nativeLocalExec: "on"` the only non-legacy mode that enables built-in local exec; unset, `off`, and `codex-sandbox` all deny.
+- 다른 대안 대신 이 방식을 선택한 이유: opencodex has no trustworthy per-request sandbox attestation in request text or headers, so any prompt-carried marker is spoofable by data-plane callers.
+- 장점, 단점 및 영향: this closes prompt-to-native-exec escalation while preserving an explicit operator escape hatch; existing configs that relied on `codex-sandbox` must switch to `nativeLocalExec: "on"` for trusted local experiments.
 
 ## WebSocket
 
@@ -65,11 +105,21 @@ closes the stream with `response.incomplete` / `upstream_stall_timeout` and canc
 request if no real adapter events arrive. Adapter-yielded `{ type: "heartbeat" }` events DO reset
 the watchdog.
 
-The web-search loop requests `stream: true` for every routed-model iteration, but fully buffers its
-semantic adapter events internally so synthetic search calls and preliminary answers never leak to
-the client. Only the first iteration's final response headers/status and any 429 key rotations are
-handled eagerly. A failure before downstream SSE starts returns non-2xx JSON; once headers have
-started the final response, a generation failure is emitted as `response.failed` SSE.
+The web-search loop requests `stream: true` for every routed-model iteration, but buffers the events
+needed to decide whether to intercept a synthetic search call. Text explicitly phased as
+`commentary` is safe to forward live because it cannot terminate the turn; this keeps Kiro's
+progress visible. A Kiro stream EOF after user-facing text or reasoning gets one bounded completion
+retry, because the upstream text event does not distinguish progress from a final answer. Synthetic search calls, real tool calls,
+and terminal events remain buffered until the iteration validates. Only the first iteration's final
+response headers/status and any 429 key rotations are handled eagerly. A failure before downstream
+SSE starts returns non-2xx JSON; once headers have started the final response, a generation failure
+is emitted as `response.failed` SSE.
+
+Historical `web_search_call` output items from previous Responses turns are not converted into
+assistant text. They are UI/search-cell evidence, not a replayable search result payload; turning
+them into strings risks routed models echoing an internal marker or implying a current search ran
+when the sidecar is unavailable. The active sidecar path is the only place that emits new
+`web_search_call_begin` / `web_search_call_end` events.
 
 Four independent clocks bound this path. `stallTimeoutSec` is the base bridge event-stall budget.
 `connectTimeoutMs` (default 200 s) covers only DNS/TCP/TLS and the wait for final response headers,
@@ -92,8 +142,48 @@ messages until the round completes, reattaching real results to their original c
 and synthesizing explicit "no tool result was recorded" answers only when no real result exists
 (Kimi/Moonshot 400 `ocx-mrqaiw05-269`; unit `devlog/_plan/260718_dangling_toolcall_hardening`).
 
+Forward-mode OpenAI passthrough also repairs replayed `call_id` values longer than the Responses
+API's 64-character limit. Sidechat/fork replay can namespace routed-provider ids beyond that limit,
+so each oversized id and all matching call/output items receive the same deterministic,
+request-local alias. Raw API-key continuations deliberately preserve ids because an output-only
+continuation may reference a call stored upstream under its original id; proxy-expanded API-key
+replays are explicit and receive the same repair.
+
 These compatibility guards are covered by focused tests and should stay close to the adapters that
 need them.
+
+## Cursor Router optimization levels
+
+Cursor Router's parameterized `default` model is represented in Codex by four catalog rows:
+`cursor/auto` preserves Cursor's team/account default, while `cursor/auto-cost`,
+`cursor/auto-balance`, and `cursor/auto-intelligence` make each optimization level explicit.
+All four route to the `default` Cursor wire model. Explicit variants additionally populate
+`AgentRunRequest.requested_model.parameters` with the `optimization` parameter; this is the same
+parameterized-model channel used by current Cursor clients. Router rows are static capabilities and
+must survive a live `GetUsableModels` response that omits `default`.
+
+## Cursor active-context usage
+
+Cursor's `conversationCheckpointUpdate.tokenDetails.usedTokens` is treated as the authoritative
+absolute active-context size for a Cursor conversation. Some client-tool suspension turns must end
+before Cursor emits a new checkpoint; those turns carry forward the last observed total for the same
+Cursor conversation instead of reporting only the tiny current-turn output delta. The carry-forward
+cache is process-local, numeric-only, bounded, and keyed by Cursor conversation id. Compaction
+boundaries clear the carry so pre-compaction totals are not reused after Codex replaces history.
+Historical compaction markers restored by `previous_response_id` expansion are acknowledged as a
+replayed prefix and do not clear a fresh post-compaction checkpoint again on every later turn.
+Compaction summarizer turns may still report their own checkpoint for that response, but their
+pre-compaction checkpoint is not persisted for later carry-forward.
+
+```text
+[Decision Log]
+- 목적과 의도: Keep Codex's visible "context left" indicator aligned with Cursor's active-context usage on client-tool turns that finalize before a checkpoint arrives.
+- 기존 구현 및 제약 조건: Checkpoint turns reported totalTokens correctly, but no-checkpoint client-tool finalize fell back to output-only usage and could overwrite a meaningful prior total with values like 109 tokens.
+- 검토한 주요 대안: Add a longer wait for late checkpoints; infer prior+output totals; store full prompt/history state; carry forward only the last numeric checkpoint per Cursor conversation.
+- 선택한 방식: Carry forward the last numeric absolute checkpoint per Cursor conversation with bounded LRU/TTL storage, update it only from live checkpoint frames, and clear/suppress it once when a newly appended compaction boundary starts an epoch; previous_response replay provenance acknowledges historical markers without serializing private metadata upstream.
+- 다른 대안 대신 이 방식을 선택한 이유: It fixes the UI regression without delaying tool turns, fabricating token growth, storing prompt/tool content, or repeatedly clearing valid post-compaction usage when historical markers replay; one-time compaction resets still prevent stale over-report when history is replaced.
+- 장점, 단점 및 영향: Active-context reporting stays monotonic within an uncompacted Cursor conversation; no-checkpoint turns remain estimated; a process restart loses the numeric cache and safely falls back to current-turn usage until the next checkpoint.
+```
 
 ## OpenRouter provider routing
 

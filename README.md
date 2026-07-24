@@ -144,7 +144,7 @@ working too.
 
 ```bash
 # Use Claude Opus through Anthropic
-codex -m "anthropic/claude-opus-4-8" "Explain this stack trace"
+codex -m "anthropic/claude-opus-5" "Explain this stack trace"
 
 # Use Gemini through Google
 codex -m "google/gemini-3-pro" "Write unit tests for auth.ts"
@@ -157,6 +157,11 @@ codex -m "ollama/llama3" "Refactor this function"
 ```
 
 When you omit the `provider/` prefix, opencodex routes to the default provider — or auto-matches based on the model name pattern (e.g., `claude-*` routes to Anthropic, `gpt-*` routes to OpenAI).
+
+Combo aliases are exact public model ids and may be bare names or use a custom namespace. If a
+combo alias exactly matches a configured non-OpenAI `provider/model` selector, the combo
+intentionally takes precedence in routing, `/v1/models`, and the Codex catalog. Renaming that
+alias or deleting the combo immediately restores the physical provider selector.
 
 Routed models also appear in the **Codex App** model picker with per-model reasoning effort controls:
 
@@ -224,6 +229,7 @@ next Codex session. opencodex keeps these behaviors:
 
 - **Use any LLM with Codex.** 5 protocol adapters cover Anthropic Messages, Google Gemini, Azure, OpenAI Responses passthrough, and every OpenAI-compatible Chat Completions endpoint — that's 40+ providers out of the box.
 - **Use any LLM with Claude Code too.** The same daemon serves the Anthropic Messages API (`/v1/messages` + `count_tokens`): `ocx claude` launches Claude Code fully wired, and routed models appear in its native `/model` picker via gateway model discovery (`claude-ocx-<provider>--<model>` aliases, Claude Code 2.1.129+). Configure slots and model maps on the dashboard's Claude page.
+- **Use any LLM with GitHub Copilot App too.** Point Copilot's Model providers at `http://127.0.0.1:10100/v1` — OpenCodex serves OpenAI-compatible `GET /v1/models` and `POST /v1/chat/completions` so routed models sync into the app. See [docs/github-copilot-app.md](docs/github-copilot-app.md).
 - **Pool ChatGPT accounts safely.** Keep existing Codex threads on one account while new sessions
   can auto-pick a lower-usage account from the pool, with quota refresh and non-PII request labels.
 - **Log in once, skip the API key.** OAuth support for xAI, Anthropic, and Kimi means you can authenticate with your existing account. Tokens auto-refresh. Or forward your `codex login`, paste an API key, or use `${ENV_VAR}` references — your call.
@@ -254,14 +260,17 @@ next Codex session. opencodex keeps these behaviors:
 | Ollama / vLLM / LM Studio (local) | `openai-chat` | key (usually blank) |
 | Any OpenAI-compatible endpoint | `openai-chat` | key |
 
-Plus DeepSeek, Groq, OpenRouter, Together, Fireworks, Cerebras, Mistral, Hugging Face, NVIDIA NIM, MiniMax, Qwen Cloud, and more. See the full list with `ocx init` or in the [provider docs](https://kiritoko1029.github.io/opencodex/reference/configuration/).
+Plus DeepSeek, Groq, OpenRouter, Together, Fireworks, Cerebras, Mistral, Hugging Face, NVIDIA NIM, MiniMax, Qwen Cloud, Tencent Cloud Coding Plan, SiliconFlow, and more. See the full list with `ocx init` or in the [provider docs](https://kiritoko1029.github.io/opencodex/reference/configuration/).
 
 Cursor support is a staged experimental bridge: it appears in `ocx init` and the dashboard Add
 Provider picker as a local config with Cursor's static public model catalog. Live
 HTTP/2 transport is enabled when a Cursor access token is configured. Cursor server-driven native
 read/write/delete/ls/grep/shell/fetch execution is disabled by default because it bypasses Codex's
-approval and sandbox path; set `unsafeAllowNativeLocalExec: true` only for trusted local
-experiments.
+approval and sandbox path. Request text such as a Codex `danger-full-access` sandbox marker never
+authorizes native local exec; set `nativeLocalExec: "on"` only for trusted local experiments where
+every data-plane caller is trusted. `nativeLocalExec: "codex-sandbox"` is accepted for backwards
+compatibility but fails closed like `off`; legacy `unsafeAllowNativeLocalExec: true` remains an
+explicit operator opt-in.
 MCP, screen recording, and computer-use are exposed through executor hooks; when no local executor
 is configured, opencodex returns typed no-executor results instead of policy-blocking the request.
 Cursor OAuth and live model discovery are enabled for the experimental Cursor adapter.
@@ -296,13 +305,19 @@ opencodex has two ways to auto-start the proxy:
 | **How** | OS service manager (launchd / systemd / schtasks) | Wraps script launchers for `codex`; real `codex.exe` is left untouched |
 | **When** | Always running after login | On-demand — runs `ocx ensure` when `codex` is launched |
 | **Restart** | Auto-restarts on crash | Starts once per `codex` invocation |
-| **Codex updates** | Unaffected | Repairs on next `ocx codex-shim install` or `ocx update` |
+| **Codex updates** | Unaffected | A completed stable launcher replacement is repaired by the next ordinary `ocx` command |
 | **Remove** | `ocx service uninstall` | `ocx codex-shim uninstall` |
 
 Use the **service** for always-on proxy (recommended for development machines). Use the **shim** for
 lightweight, on-demand proxy startup without a background daemon. Shim autostart is enabled by default
 and can be disabled from the GUI dashboard. If the configured proxy port is already busy, `ocx start`
 automatically picks another free local port and updates Codex to use it.
+
+If an external Codex update overwrites an installed shim, the next ordinary `ocx` command backs up
+the stable new launcher and restores the shim. A launcher that is still changing is left untouched
+and retried later. Repair failures warn without failing the requested command; use
+`ocx codex-shim install` as the manual fallback. Set `codexShimAutoRestore` to `false`, or set
+`OPENCODEX_CODEX_SHIM_AUTO_RESTORE=0` for a process-level opt-out.
 
 ### Uninstall
 
@@ -345,13 +360,18 @@ Here's a typical multi-provider setup:
 }
 ```
 
-Provider entries can also annotate routed catalog metadata. Use `contextWindow` for a provider-wide
-Codex-visible context cap, `modelContextWindows` for model-specific caps, and
+Provider entries can also annotate routed catalog metadata and output defaults. Use `contextWindow`
+for a provider-wide Codex-visible context cap, `modelContextWindows` for model-specific caps, and
 `modelInputModalities` for model-specific catalog input hints such as `["text"]` or
-`["text", "image"]`. Context values cap live `/models` metadata; they never raise a smaller live
-context window. The bundled GPT-5.6 Sol/Terra/Luna fallback metadata uses a 1,050,000-token context
-window for OpenAI API key and OpenRouter catalog entries; it does not bypass upstream preview
-access. See the configuration reference for the full field list.
+`["text", "image"]`. For Responses models that reject Codex reasoning-summary delivery fields, set
+`modelSupportsReasoningSummaries.<model-id>` to `false`; this updates the catalog and strips stale
+summary-delivery fields at the adapter boundary. For OpenAI-compatible chat providers whose upstream default response budget is
+too small, set `defaultMaxOutputTokens` or per-model `modelMaxOutputTokens`; explicit
+`max_output_tokens` from the client still wins, and unset configs still omit `max_tokens`. Context
+values cap live `/models` metadata; they never raise a smaller live context window. The bundled
+GPT-5.6 Sol/Terra/Luna fallback metadata uses a 1,050,000-token context window for OpenAI API key
+and OpenRouter catalog entries; it does not bypass upstream preview access. See the configuration
+reference for the full field list.
 
 > **GLM-5.2 1M context via Z.AI:** through the `openai-chat` adapter, both `glm-5.2`
 > and `glm-5.2[1m]` work — opencodex strips the trailing `[1m]` suffix before

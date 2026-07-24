@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,19 +20,33 @@ import { responseWithDeferredRequestLog } from "../src/server/relay";
 import { readUsageEntries } from "../src/usage/log";
 import { saveCodexAccountCredential } from "../src/codex/account-store";
 import { formatCodexProviderForLog } from "../src/codex/routing";
+import { startServer } from "../src/server";
+import { fakeChatGptJwt } from "./helpers/fake-chatgpt-jwt";
+
+// Full-suite Windows load: startServer + combo rename/delete management flows exceed the
+// default 5s per-test budget (same flake class as 810fa115 / claude-management-api).
+setDefaultTimeout(30_000);
 
 const actualResolver = await import("../src/server/adapter-resolve");
 const actualResolveAdapter = actualResolver.resolveAdapter;
 const actualRetry = await import("../src/lib/upstream-retry");
 const actualFetchWithTransientRetry = actualRetry.fetchWithTransientRetry;
+const { createCursorAdapter } = await import("../src/adapters/cursor");
+import type { CursorTransportFactory } from "../src/adapters/cursor/transport";
 let customRunTurn: NonNullable<ProviderAdapter["runTurn"]> | undefined;
 let customFetchResponse: NonNullable<ProviderAdapter["fetchResponse"]> | undefined;
 let customTransientResponse: (() => Promise<Response>) | undefined;
 let customUsageEstimate: ((model: string) => number | undefined) | undefined;
+let customCursorTransportFactory: CursorTransportFactory | undefined;
 
 mock.module("../src/server/adapter-resolve", () => ({
   ...actualResolver,
   resolveAdapter(provider: OcxProviderConfig, cacheRetention?: "none" | "short" | "long") {
+    if (provider.adapter === "cursor" && customCursorTransportFactory) {
+      // Real cursor adapter (adapter.name === "cursor") over a fake transport, so server-level
+      // tests can drive the genuine continuation/persistence policy without a live socket.
+      return createCursorAdapter(provider, { createTransport: customCursorTransportFactory });
+    }
     if (provider.adapter === "test-run-turn") {
       const adapter: ProviderAdapter = {
         name: "test-run-turn",
@@ -108,6 +122,7 @@ beforeEach(() => {
   customFetchResponse = undefined;
   customTransientResponse = undefined;
   customUsageEstimate = undefined;
+  customCursorTransportFactory = undefined;
   clearRequestLogsForTests();
 });
 
@@ -234,6 +249,29 @@ async function postLogged(
   return responseWithDeferredRequestLog(
     response,
     `combo-test-${loggedRequestSequence}`,
+    start,
+    logCtx,
+  );
+}
+
+async function postModelLogged(
+  config: OcxConfig,
+  model: string,
+  raw: Record<string, unknown> = {},
+  options: HandleOptions = {},
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  const logCtx: RequestLogContext = { model: "", provider: "" };
+  const start = Date.now();
+  const response = await handleResponses(new Request("http://localhost/v1/responses", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify({ model, input: "hello", stream: false, ...raw }),
+  }), config, logCtx, options);
+  loggedRequestSequence += 1;
+  return responseWithDeferredRequestLog(
+    response,
+    `direct-test-${loggedRequestSequence}`,
     start,
     logCtx,
   );
@@ -375,6 +413,127 @@ describe("server combo failover 030 activation matrix", () => {
           { ordinal: 2, provider: "b", model: "m2", status: 200, usage: { inputTokens: 2, outputTokens: 1 } },
         ],
       });
+    }
+  });
+
+  test("bare alias runs full failover and preserves structural combo log identity", async () => {
+    const targetBodies: Array<{ provider: string; model?: unknown }> = [];
+    const a = serve(async request => {
+      const body = await request.json() as { model?: unknown };
+      targetBodies.push({ provider: "a", model: body.model });
+      return Response.json({ error: { message: "overloaded" } }, { status: 503 });
+    });
+    const b = serve(async request => {
+      const body = await request.json() as { model?: unknown };
+      targetBodies.push({ provider: "b", model: body.model });
+      return chatSuccess("alias backup", "m2");
+    });
+    const config = comboConfig({
+      a: provider("openai-chat", baseUrl(a), "key-a"),
+      b: provider("openai-chat", baseUrl(b), "key-b"),
+    }, undefined, { alias: "deepseek-v4-flash" });
+    const response = await postLogged(config, { model: "deepseek-v4-flash" });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("alias backup");
+    expect(targetBodies).toEqual([
+      { provider: "a", model: "m1" },
+      { provider: "b", model: "m2" },
+    ]);
+    const { log, usage } = await latestAttemptReceipts(config);
+    for (const receipt of [log, usage]) {
+      expect(receipt).toMatchObject({
+        provider: "combo",
+        model: "deepseek-v4-flash",
+        requestedModel: "deepseek-v4-flash",
+        attempts: [
+          { ordinal: 1, provider: "a", model: "m1", status: 503 },
+          { ordinal: 2, provider: "b", model: "m2", status: 200 },
+        ],
+      });
+    }
+  });
+
+  test("ordinary /v1/models restores a non-OpenAI selector after combo alias rename and deletion", async () => {
+    const selector = "deepseek/deepseek-chat";
+    const combo = {
+      strategy: "failover" as const,
+      targets: [{ provider: "deepseek", model: "deepseek-chat" }],
+      alias: selector,
+    };
+    const config = comboConfig({
+      deepseek: provider("openai-chat", "http://127.0.0.1:1/v1", "key-deepseek", {
+        liveModels: false,
+        models: ["deepseek-chat"],
+        modelContextWindows: { "deepseek-chat": 128_000 },
+      }),
+    }, combo.targets, { alias: combo.alias });
+    saveConfig(config);
+    const server = startServer(0);
+    try {
+      const publicRows = async () => {
+        const response = await fetch(new URL("/v1/models", server.url));
+        expect(response.status).toBe(200);
+        const payload = await response.json() as {
+          data: Array<{ id: string; owned_by: string }>;
+        };
+        return payload.data;
+      };
+      const updateAlias = async (alias: string) => fetch(new URL("/api/combos", server.url), {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: "free", combo: { ...combo, alias } }),
+      });
+
+      expect((await publicRows()).filter(model => model.id === selector)).toEqual([
+        { id: selector, object: "model", created: 0, owned_by: "combo" },
+      ]);
+
+      const renamed = await updateAlias("fast-chat");
+      expect(renamed.status).toBe(200);
+      const renamedRows = await publicRows();
+      expect(renamedRows.filter(model => model.id === selector)).toEqual([
+        { id: selector, object: "model", created: 0, owned_by: "deepseek" },
+      ]);
+      expect(renamedRows.filter(model => model.id === "fast-chat")).toEqual([
+        { id: "fast-chat", object: "model", created: 0, owned_by: "combo" },
+      ]);
+
+      const restored = await updateAlias(selector);
+      expect(restored.status).toBe(200);
+      const deleted = await fetch(new URL("/api/combos?id=free", server.url), { method: "DELETE" });
+      expect(deleted.status).toBe(200);
+      const deletedRows = await publicRows();
+      expect(deletedRows.filter(model => model.id === selector)).toEqual([
+        { id: selector, object: "model", created: 0, owned_by: "deepseek" },
+      ]);
+      expect(deletedRows.some(model => model.owned_by === "combo")).toBe(false);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("ordinary /v1/models preserves raw nested selectors while an exact combo alias wins", async () => {
+    const config = comboConfig({
+      a: provider("openai-chat", "http://127.0.0.1:1/v1", "key-a", {
+        liveModels: false,
+        models: ["vendor/model", "vendor-model"],
+        modelContextWindows: { "vendor/model": 128_000, "vendor-model": 128_000 },
+      }),
+    }, [{ provider: "a", model: "vendor/model" }], { alias: "a/vendor-model" });
+    saveConfig(config);
+    const server = startServer(0);
+    try {
+      const response = await fetch(new URL("/v1/models", server.url));
+      expect(response.status).toBe(200);
+      const payload = await response.json() as {
+        data: Array<{ id: string; owned_by: string }>;
+      };
+      expect(payload.data.filter(model => model.id.startsWith("a/vendor")).sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+        { id: "a/vendor-model", object: "model", created: 0, owned_by: "combo" },
+        { id: "a/vendor/model", object: "model", created: 0, owned_by: "a" },
+      ]);
+    } finally {
+      await server.stop(true);
     }
   });
 
@@ -597,6 +756,7 @@ describe("server combo failover 030 activation matrix", () => {
       a: provider("openai-chat", "http://127.0.0.1:1/v1", "key-a"),
       b: provider("openai-chat", baseUrl(b), "key-b"),
     });
+    config.connectTimeoutMs = 250;
     const response = await post(config);
     expect(response.status).toBe(200);
     expect(bHits).toBe(1);
@@ -686,7 +846,10 @@ describe("server combo failover 030 activation matrix", () => {
     const response = await post(config, {
       stream: true,
       tools: [{ type: "web_search" }],
-    }, {}, { authorization: "Bearer forwarded-main" });
+    }, {}, {
+      authorization: `Bearer ${fakeChatGptJwt({ chatgpt_account_id: "acct-combo-search" })}`,
+      "chatgpt-account-id": "acct-combo-search",
+    });
     expect(response.status).toBe(200);
     expect(JSON.stringify(await collectSse(response))).toContain("web loop backup");
     expect(modelHits.map(hit => hit.model)).toEqual(["m1", "m2"]);
@@ -815,6 +978,62 @@ describe("server combo failover 030 activation matrix", () => {
     }, undefined, { defaultEffort: "high" });
     expect((await post(config)).status).toBe(200);
     expect(backupBody).not.toHaveProperty("reasoning_effort");
+  });
+
+  test("bare third-party defaultModel keeps max off the native clamp path", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    customFetchResponse = async request => {
+      const body = JSON.parse(String(request.body)) as Record<string, unknown>;
+      seen.push(body);
+      return chatSuccess("ok", String(body.model ?? "glm-5.2-fast-preview"));
+    };
+    const config: OcxConfig = {
+      port: 0,
+      defaultProvider: "bailian",
+      providers: {
+        bailian: provider("test-response", "https://test.invalid/v1", "key-b", {
+          defaultModel: "glm-5.2-fast-preview",
+          modelReasoningEfforts: { "glm-5.2-fast-preview": ["low", "medium", "high", "xhigh", "max"] },
+        }),
+      },
+    };
+
+    const bare = await postModelLogged(config, "glm-5.2-fast-preview", { reasoning: { effort: "max" } });
+    expect(bare.status).toBe(200);
+    await bare.text();
+    expect(seen[0]!.reasoning_effort).toBe("max");
+    let { log, usage } = await latestAttemptReceipts(config);
+    expect(log).toMatchObject({
+      provider: "bailian",
+      requestedModel: "glm-5.2-fast-preview",
+      requestedEffort: "max",
+      resolvedModel: "glm-5.2-fast-preview",
+    });
+    expect(usage).toMatchObject({
+      provider: "bailian",
+      requestedModel: "glm-5.2-fast-preview",
+      requestedEffort: "max",
+      resolvedModel: "glm-5.2-fast-preview",
+    });
+
+    seen.length = 0;
+    const prefixed = await postModelLogged(config, "bailian/glm-5.2-fast-preview", { reasoning: { effort: "max" } });
+    expect(prefixed.status).toBe(200);
+    await prefixed.text();
+    expect(seen[0]!.reasoning_effort).toBe("max");
+    ({ log, usage } = await latestAttemptReceipts(config));
+    expect(log).toMatchObject({
+      provider: "bailian",
+      requestedModel: "bailian/glm-5.2-fast-preview",
+      requestedEffort: "max",
+      resolvedModel: "glm-5.2-fast-preview",
+    });
+    expect(usage).toMatchObject({
+      provider: "bailian",
+      requestedModel: "bailian/glm-5.2-fast-preview",
+      requestedEffort: "max",
+      resolvedModel: "glm-5.2-fast-preview",
+    });
   });
 
   test("xAI 401 refresh stays within one target and succeeds without backup", async () => {
@@ -1252,4 +1471,145 @@ describe("server combo failover 030 activation matrix", () => {
     expect(attempt).toMatchObject({ provider: "a", status: 429, usageStatus: "unreported" });
     expect(attempt).not.toHaveProperty("usage");
   }, 10_000);
+});
+
+describe("cursor conversation continuity across store:false chains", () => {
+  function fakeCursorTransportFactory(seenConversationIds: string[]): CursorTransportFactory {
+    return () => ({
+      async *run(request) {
+        seenConversationIds.push(request.conversationId);
+        yield { type: "text", text: "cursor ok" };
+        yield { type: "done", usage: { inputTokens: 10, outputTokens: 2, estimated: true } };
+      },
+      writeClient() {},
+      close() {},
+    });
+  }
+
+  async function postCursor(config: OcxConfig, raw: Record<string, unknown>): Promise<Response> {
+    return handleResponses(new Request("http://localhost/v1/responses", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ stream: false, store: false, ...raw }),
+    }), config, { model: "", provider: "" }, {});
+  }
+
+  function cursorConfig(): OcxConfig {
+    return {
+      port: 0,
+      // Registry forces authMode=oauth for the canonical "cursor" name; a non-registry
+      // provider name keeps key auth so the fake transport is reachable without a login.
+      defaultProvider: "cursortest",
+      providers: {
+        cursortest: provider("cursor", "https://api2.cursor.sh", "fake-cursor-token"),
+      },
+    };
+  }
+
+  test("store:false chain reuses the SAME cursor conversationId (native model)", async () => {
+    const seen: string[] = [];
+    customCursorTransportFactory = fakeCursorTransportFactory(seen);
+    const config = cursorConfig();
+
+    const first = await postCursor(config, { model: "cursortest/composer-2", input: "hello" });
+    expect(first.status).toBe(200);
+    const firstJson = await first.json() as { id: string };
+    expect(seen).toHaveLength(1);
+
+    const second = await postCursor(config, {
+      model: "cursortest/composer-2",
+      previous_response_id: firstJson.id,
+      input: [{ role: "user", content: "continue" }],
+    });
+    expect(second.status).toBe(200);
+    expect(seen).toHaveLength(2);
+    // The whole point of forced continuation: the second turn continues the SAME
+    // Cursor conversation instead of minting a fresh id (which would miss the
+    // context-usage carry-forward and report output-delta-sized totals).
+    expect(seen[1]).toBe(seen[0]);
+  });
+
+  test("external-model toolResult continuation preserves and persists the same id", async () => {
+    const seen: string[] = [];
+    customCursorTransportFactory = fakeCursorTransportFactory(seen);
+    const config = cursorConfig();
+
+    const first = await postCursor(config, { model: "cursortest/grok-4.5", input: "use tools" });
+    expect(first.status).toBe(200);
+    const firstJson = await first.json() as { id: string };
+    expect(seen).toHaveLength(1);
+
+    const second = await postCursor(config, {
+      model: "cursortest/grok-4.5",
+      previous_response_id: firstJson.id,
+      input: [{ type: "function_call_output", call_id: "call_x", output: "tool says hi" }],
+    });
+    expect(second.status).toBe(200);
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toBe(seen[0]);
+
+    const secondJson = await second.json() as { id: string };
+    const { previousResponseProviderState } = await import("../src/responses/state");
+    expect(previousResponseProviderState(secondJson.id)?.cursor?.conversationId).toBe(seen[1]);
+  });
+
+  test("external store:false full-history turns reuse the client thread identity", async () => {
+    const seen: string[] = [];
+    customCursorTransportFactory = fakeCursorTransportFactory(seen);
+    const config = cursorConfig();
+    const postThreadTurn = (input: unknown) => handleResponses(new Request("http://localhost/v1/responses", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-codex-parent-thread-id": "desktop-thread-external",
+      },
+      body: JSON.stringify({
+        model: "cursortest/grok-4.5",
+        input,
+        stream: false,
+        store: false,
+        prompt_cache_key: "shared-cache-key",
+      }),
+    }), config, { model: "", provider: "" }, {});
+
+    expect((await postThreadTurn("start")).status).toBe(200);
+    expect((await postThreadTurn([
+      { role: "user", content: "start" },
+      { role: "assistant", content: "working" },
+      { type: "function_call_output", call_id: "call_x", output: "tool result" },
+    ])).status).toBe(200);
+
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toBe(seen[0]);
+  });
+
+  test("native composer reuses conversationId across store:false turns via parent thread id", async () => {
+    const seen: string[] = [];
+    customCursorTransportFactory = fakeCursorTransportFactory(seen);
+    const config = cursorConfig();
+    const postThreadTurn = (input: unknown) => handleResponses(new Request("http://localhost/v1/responses", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-codex-parent-thread-id": "desktop-thread-native",
+      },
+      body: JSON.stringify({
+        model: "cursortest/composer-2.5",
+        input,
+        stream: false,
+        store: false,
+        prompt_cache_key: "shared-cache-key",
+      }),
+    }), config, { model: "", provider: "" }, {});
+
+    expect((await postThreadTurn("hello")).status).toBe(200);
+    expect((await postThreadTurn([
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "cursor ok" },
+      { role: "user", content: "continue" },
+    ])).status).toBe(200);
+
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toBe(seen[0]);
+  });
 });

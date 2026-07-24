@@ -2,6 +2,41 @@ import { describe, expect, test } from "bun:test";
 import { parseRequest } from "../src/responses/parser";
 
 describe("Responses parser", () => {
+  test("describes the exact apply_patch freeform envelope", () => {
+    const parsed = parseRequest({
+      model: "xai/grok-4.5",
+      input: "Update a file",
+      tools: [{ type: "custom", name: "apply_patch", description: "Apply a patch" }],
+    });
+
+    expect(parsed.context.tools?.[0]).toMatchObject({
+      name: "apply_patch",
+      freeform: true,
+      parameters: {
+        properties: {
+          input: {
+            description: expect.stringContaining("begin exactly with `*** Begin Patch`"),
+          },
+        },
+      },
+    });
+  });
+
+  test("preserves assistant message phase when replaying Responses output", () => {
+    const parsed = parseRequest({
+      model: "kiro/gpt-5.6-sol",
+      input: [
+        { type: "message", role: "assistant", phase: "commentary", content: [{ type: "output_text", text: "working" }] },
+        { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "done" }] },
+      ],
+    });
+
+    expect(parsed.context.messages).toMatchObject([
+      { role: "assistant", phase: "commentary", content: [{ type: "text", text: "working" }] },
+      { role: "assistant", phase: "final_answer", content: [{ type: "text", text: "done" }] },
+    ]);
+  });
+
   test("preserves allowed_tools tool_choice instead of widening it to auto", () => {
     const parsed = parseRequest({
       model: "umans/umans-kimi-k2.7",
@@ -176,6 +211,7 @@ describe("codex-rs compat surface (260707)", () => {
     expect(first.role).toBe("user");
     expect(first.content as string).toContain(summary);
     expect(parsed._compactionRequest).toBeUndefined();
+    expect(parsed._contextCompactionBoundary).toBe(true);
   });
 
   test("context_compaction without payload is a silent marker (no opaque note)", () => {
@@ -185,6 +221,7 @@ describe("codex-rs compat surface (260707)", () => {
     ]});
     expect(parsed.context.messages).toHaveLength(1);
     expect(parsed.context.messages[0].content).toBe("hello");
+    expect(parsed._contextCompactionBoundary).toBe(true);
   });
 
   test("local_shell_call pairs with its function_call_output", () => {
@@ -204,14 +241,15 @@ describe("codex-rs compat surface (260707)", () => {
     expect(result?.content).toBe("total 0");
   });
 
-  test("web_search_call replay becomes assistant history text with the query", () => {
+  test("web_search_call replay stays out of assistant-visible history text", () => {
     const parsed = parseRequest({ ...base, input: [
       { type: "web_search_call", status: "completed", action: { type: "search", query: "bun 1.3 release" } },
       { type: "message", role: "user", content: "and now?" },
     ]});
-    const assistant = parsed.context.messages.find(m => m.role === "assistant");
-    const text = (assistant?.content as { type: string; text?: string }[]).find(p => p.type === "text");
-    expect(text?.text).toContain("bun 1.3 release");
+    const serialized = JSON.stringify(parsed.context.messages);
+    expect(serialized).not.toContain("[web search performed");
+    expect(serialized).not.toContain("bun 1.3 release");
+    expect(parsed.context.messages.map(m => m.role)).toEqual(["user"]);
   });
 
   test("tool_search_output failed status is surfaced as an error result", () => {

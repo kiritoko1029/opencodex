@@ -84,6 +84,7 @@ export type ProviderUpdatePatch = {
   note?: string;
   disabled?: boolean;
   allowPrivateNetwork?: boolean;
-  /** Opt-in: copy caller User-Agent to openai-chat / openai-responses (key) upstream. */
+  /** Opt-in: copy caller User-Agent onto custom-channel upstream requests. */
   forwardUserAgent?: boolean;
+  liveModels?: boolean;
 };

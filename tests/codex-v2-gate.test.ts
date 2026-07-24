@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
-import { buildCatalogEntries, mergeCatalogEntriesForSync, nativeEffortClamp, type MultiAgentMode } from "../src/codex/catalog";
+import { buildCatalogEntries, mergeCatalogEntriesForSync, nativeEffortClamp, shouldApplyNativeEffortClamp, type MultiAgentMode } from "../src/codex/catalog";
 import {
   getAgentsMaxThreads,
   getLogicalMaxThreads,
@@ -409,11 +409,19 @@ describe("cli surface", () => {
   });
 
   test("codexFeaturesInvocation: POSIX passthrough; win32 .cmd routed through cmd.exe (devlog 260715 020)", () => {
-    expect(codexFeaturesInvocation("enable", "darwin", { env: {} }))
-      .toEqual({ file: "codex", args: ["features", "enable", "multi_agent_v2"], options: {} });
+    const execFileSync = () => "codex-cli 0.145.0";
+    expect(codexFeaturesInvocation("enable", "darwin", {
+      env: { PATH: "" },
+      configDir: mkdtempSync(join(tmpdir(), "ocx-v2-inv-posix-")),
+      existsSync: () => false,
+      execFileSync,
+    })).toEqual({ file: "codex", args: ["features", "enable", "multi_agent_v2"], options: {} });
     // Explicit CODEX_CLI_PATH pointing at a .cmd (npm-only Windows Codex install).
     const inv = codexFeaturesInvocation("disable", "win32", {
-      env: { CODEX_CLI_PATH: "C:\\npm\\codex.cmd", ComSpec: "C:\\WINDOWS\\system32\\cmd.exe" },
+      env: { CODEX_CLI_PATH: "C:\\npm\\codex.cmd", ComSpec: "C:\\WINDOWS\\system32\\cmd.exe", PATH: "" },
+      configDir: mkdtempSync(join(tmpdir(), "ocx-v2-inv-cmd-")),
+      existsSync: () => true,
+      execFileSync,
       exists: () => { throw new Error("explicit path must not probe PATH"); },
     });
     expect(inv.file).toBe("C:\\WINDOWS\\system32\\cmd.exe");
@@ -422,6 +430,9 @@ describe("cli surface", () => {
     // Bare `codex` resolving to codex.exe stays a direct spawn.
     const exe = codexFeaturesInvocation("enable", "win32", {
       env: { PATH: "C:\\bin" },
+      configDir: mkdtempSync(join(tmpdir(), "ocx-v2-inv-exe-")),
+      existsSync: (p: string) => p === "C:\\bin\\codex.exe",
+      execFileSync,
       exists: (p: string) => p === "C:\\bin\\codex.exe",
     });
     expect(exe).toEqual({ file: "C:\\bin\\codex.exe", args: ["features", "enable", "multi_agent_v2"], options: {} });
@@ -476,6 +487,24 @@ describe("mock-max wire clamp (nativeEffortClamp)", () => {
   test("real-max natives are untouched", () => {
     expect(nativeEffortClamp("gpt-5.6-sol", "max")).toBe(null);
     expect(nativeEffortClamp("gpt-5.6-luna", "max")).toBe(null);
+  });
+
+  test("only the canonical built-in OpenAI forward route enters the native clamp gate", () => {
+    const nativeProvider = {
+      adapter: "openai-responses",
+      baseUrl: "https://chatgpt.com/backend-api/codex",
+      authMode: "forward",
+    } as const;
+    const routedProvider = {
+      adapter: "openai-chat",
+      baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      authMode: "key",
+      apiKey: "dashscope-test",
+    } as const;
+
+    expect(shouldApplyNativeEffortClamp("openai", nativeProvider as never, "gpt-5.5")).toBe(true);
+    expect(shouldApplyNativeEffortClamp("bailian", routedProvider as never, "glm-5.2-fast-preview")).toBe(false);
+    expect(shouldApplyNativeEffortClamp("bailian", routedProvider as never, "bailian/glm-5.2-fast-preview")).toBe(false);
   });
 
   test("ordinary efforts and routed slugs pass through; unknown BARE natives clamp conservatively", () => {

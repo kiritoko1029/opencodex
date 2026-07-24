@@ -151,6 +151,7 @@ describe("request log metadata", () => {
       model: "combo/free",
       provider: "combo",
       requestedModel: "combo/free",
+      comboId: "free",
       resolvedModel: "model-b",
       providerAdapter: "openai-chat",
       usage: { inputTokens: 10, outputTokens: 2 },
@@ -636,6 +637,14 @@ describe("request log metadata", () => {
       code: "tool_catalog_too_large",
       message: "Cursor resource limit exceeded: tool catalog too large",
     })).toBe(400);
+  });
+
+  test("httpStatusFromTerminalError maps Cursor quota-style resource exhaustion to 429", () => {
+    expect(httpStatusFromTerminalError({
+      type: "rate_limit_error",
+      code: "rate_limit_exceeded",
+      message: "Cursor rate limit exceeded: Cursor Connect error resource limit exceeded: Error",
+    })).toBe(429);
   });
 
   test("httpStatusFromTerminalError maps client-closed web-search aborts to 499", () => {

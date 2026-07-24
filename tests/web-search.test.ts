@@ -7,6 +7,7 @@ import { listOpenAiForwardSidecarCandidates, resolveFirstUsableOpenAiSidecar } f
 import type { AdapterEvent, OcxConfig, OcxProviderConfig } from "../src/types";
 import type { AdapterFetchContext, ProviderAdapter } from "../src/adapters/base";
 import type { OcxMessage, OcxParsedRequest } from "../src/types";
+import { fakeChatGptJwt } from "./helpers/fake-chatgpt-jwt";
 
 const routedProvider: OcxProviderConfig = {
   adapter: "openai-chat",
@@ -66,6 +67,74 @@ describe("web-search sidecar planning", () => {
       cfg,
     );
     expect(resolved).toBeUndefined();
+  });
+
+  test("central Direct sidecar selection requires a canonical ChatGPT account-bearing bearer", async () => {
+    const cfg: OcxConfig = {
+      port: 10100,
+      defaultProvider: "routed",
+      providers: {
+        routed: routedProvider,
+        openai: {
+          adapter: "openai-responses",
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          authMode: "forward",
+          codexAccountMode: "direct",
+        },
+      },
+    };
+    const opaque = await resolveFirstUsableOpenAiSidecar(
+      listOpenAiForwardSidecarCandidates(cfg),
+      new Headers({ authorization: "Bearer sk-provider-secret", "chatgpt-account-id": "acct-forged" }),
+      cfg,
+    );
+    expect(opaque).toBeUndefined();
+
+    const mismatched = await resolveFirstUsableOpenAiSidecar(
+      listOpenAiForwardSidecarCandidates(cfg),
+      new Headers({
+        authorization: `Bearer ${fakeChatGptJwt({ chatgpt_account_id: "acct-jwt" })}`,
+        "chatgpt-account-id": "acct-other",
+      }),
+      cfg,
+    );
+    expect(mismatched).toBeUndefined();
+  });
+
+  test("central Direct sidecar selection requires an explicit matching ChatGPT account header", async () => {
+    const cfg: OcxConfig = {
+      port: 10100,
+      defaultProvider: "routed",
+      providers: {
+        routed: routedProvider,
+        openai: {
+          adapter: "openai-responses",
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          authMode: "forward",
+          codexAccountMode: "direct",
+        },
+      },
+    };
+    const token = fakeChatGptJwt({ chatgpt_account_id: "acct-jwt" });
+    const missingHeader = await resolveFirstUsableOpenAiSidecar(
+      listOpenAiForwardSidecarCandidates(cfg),
+      new Headers({ authorization: `Bearer ${token}` }),
+      cfg,
+    );
+    expect(missingHeader).toBeUndefined();
+
+    const resolved = await resolveFirstUsableOpenAiSidecar(
+      listOpenAiForwardSidecarCandidates(cfg),
+      new Headers({
+        authorization: `Bearer ${token}`,
+        "chatgpt-account-id": "acct-jwt",
+      }),
+      cfg,
+    );
+    expect(resolved).toBeDefined();
+    expect(resolved?.authContext).toEqual({ kind: "main", accountId: null });
+    expect(resolved?.headers.get("authorization")).toBe(`Bearer ${token}`);
+    expect(resolved?.headers.get("chatgpt-account-id")).toBe("acct-jwt");
   });
 
   test("sidecar auth stays lazy when search is absent, disabled, or native-passthrough", () => {
@@ -203,6 +272,59 @@ function scriptedAdapter(firstPass: AdapterEvent[]): ProviderAdapter {
 }
 
 describe("BUG-R86 routed web-search timeout semantics", () => {
+  test("Kiro-style commentary streams before the iteration finishes", async () => {
+    let releaseIteration: () => void = () => {};
+    const iterationGate = new Promise<void>(resolve => { releaseIteration = resolve; });
+    const adapter: ProviderAdapter = {
+      name: "kiro-commentary",
+      buildRequest: () => ({ url: "https://routed.test/v1", method: "POST", headers: {}, body: "{}" }),
+      fetchResponse: async () => new Response("wire", { status: 200 }),
+      async *parseStream() {
+        yield { type: "text_delta", text: "Hi from Kiro", phase: "commentary" };
+        await iterationGate;
+        yield { type: "done" };
+      },
+      async parseResponse() {
+        throw new Error("parseResponse must be unreachable");
+      },
+    };
+
+    const response = await runWithWebSearch({
+      parsed: parseRequest({ model: "routed/model", input: "hi", stream: true, tools: [{ type: "web_search" }] }),
+      adapter,
+      forwardProvider,
+      hostedTool: { type: "web_search" },
+      selectedForwardHeaders: new Headers({ authorization: "Bearer token" }),
+      settings: { model: "gpt-5.6-luna", reasoning: "low", timeoutMs: 30_000 },
+      maxSearches: 1,
+    });
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    try {
+      for (let reads = 0; reads < 10 && !text.includes("Hi from Kiro"); reads++) {
+        const result = await Promise.race([
+          reader.read(),
+          new Promise<"timeout">(resolve => setTimeout(() => resolve("timeout"), 250)),
+        ]);
+        expect(result).not.toBe("timeout");
+        if (result === "timeout" || result.done) break;
+        text += decoder.decode(result.value, { stream: true });
+      }
+      expect(text).toContain("Hi from Kiro");
+    } finally {
+      releaseIteration();
+    }
+
+    for (;;) {
+      const result = await reader.read();
+      if (result.done) break;
+      text += decoder.decode(result.value, { stream: true });
+    }
+    expect(text).toContain("event: response.completed");
+  });
+
   test("routed iterations use upstream streaming and never call parseResponse", async () => {
     const seenStream: boolean[] = [];
     let parseStreamCalls = 0;

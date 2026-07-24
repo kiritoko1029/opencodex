@@ -18,14 +18,17 @@ export interface CursorTransportFactoryInput {
   headers?: Headers;
   /** Pre-first-frame deadline (dial + first server frame). Defaults to 30s when omitted. */
   firstFrameTimeoutMs?: number;
+  /** Grace (ms) between close() and the force-destroy fallback after a first-frame timeout. Defaults to 1s. */
+  timeoutDestroyGraceMs?: number;
   /**
    * Grace window (ms) before a drained client-tool turn is finalized, so a sibling tool call
    * announced in a later receive chunk can revoke a premature finalize. Defaults to 50ms.
    */
   clientToolFinalizeGraceMs?: number;
   /**
-   * True when the inbound request's system/developer text declares the Codex full-access
-   * sandbox; consumed by nativeLocalExec:"codex-sandbox" policy (exec-policy.ts).
+   * True when inbound request text carries the legacy Codex full-access sandbox marker.
+   * This is retained as diagnostic/context only; exec-policy.ts does not trust it as
+   * native local exec authorization because the text is caller-controlled.
    */
   requestDeclaresFullAccess?: boolean;
 }

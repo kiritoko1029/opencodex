@@ -126,6 +126,8 @@ Claude 페이지에서 압축 값을 조절할 수 있어요. **경고:** 모델
 `ANTHROPIC_SMALL_FAST_MODEL`이에요. 실제 Haiku 값은 `tierModels.haiku ?? smallFastModel`이며,
 두 Haiku 변수에 모두 들어가요.
 
+`tierModels.haiku`와 `smallFastModel`이 모두 없으면 OpenCodex는 두 보조 모델 변수를 설정하지 않아요. 그러면 Claude Code가 네이티브 보조 모델(현재 Sonnet)을 선택하며, 네이티브 프로바이더 요금이 발생할 수 있어요.
+
 ## 로스터 에이전트(injectAgents)
 
 `ocx claude`와 시스템 환경 데몬은 추천 서브에이전트 로스터(Subagents 탭, 최대 5개 모델)와
@@ -135,7 +137,7 @@ Claude 페이지에서 압축 값을 조절할 수 있어요. **경고:** 모델
   둘 다 없으면 만들지 않아요. 모델 상속은 사용하지 않아요.
 - 각 에이전트 본문에는 `<!-- ocx-route: <model> -->` 지시문이 들어 있어요. 프록시는 이 지시문으로
   실제 라우트를 고정해요. 따라서 Agent 도구의 `model` 인자는 작동하지 않으며, 자리 표시자로
-  `"sonnet"`을 전달하세요.
+  `"haiku"`를 전달하세요.
 - frontmatter에는 별칭이 들어가고, 라우팅은 지시문을 따라요.
 - `generated-by: opencodex`가 들어 있는 표식 검증된 `ocx-*.md` 파일만 덮어쓰거나 정리해요.
   사용자가 만든 에이전트는 건드리지 않아요.
@@ -371,4 +373,4 @@ Anthropic 백엔드를 명시하면 의도적으로 실패 후 중단해요.
 
 **서브에이전트가 잘못된 모델로 디스패치됨** — 로스터 에이전트(`ocx-*`)는 Agent 도구의 `model`
 인자가 아니라 `<!-- ocx-route: ... -->` 지시문을 사용해요. 지시문이 원하는 라우트와 일치하는지
-확인하고, 모델 자리 표시자로 `"sonnet"`을 전달하세요.
+확인하고, 모델 자리 표시자로 `"haiku"`를 전달하세요.

@@ -53,6 +53,8 @@ export interface ProviderRegistryEntry {
   contextWindow?: number;
   modelContextWindows?: Record<string, number>;
   modelInputModalities?: Record<string, string[]>;
+  defaultMaxOutputTokens?: number;
+  modelMaxOutputTokens?: Record<string, number>;
   reasoningEfforts?: string[];
   modelReasoningEfforts?: Record<string, string[]>;
   modelDefaultReasoningEfforts?: Record<string, string>;
@@ -87,7 +89,7 @@ export type ProviderConfigSeed = Pick<
   OcxProviderConfig,
   "adapter" | "baseUrl" | "authMode" | "keyOptional" | "freeTier" | "modelSuffixBracketStrip" | "defaultModel" | "models"
   | "liveModels" | "contextWindow" | "modelContextWindows" | "modelInputModalities"
-  | "modelMaxInputTokens"
+  | "modelMaxInputTokens" | "defaultMaxOutputTokens" | "modelMaxOutputTokens"
   | "reasoningEfforts" | "modelReasoningEfforts" | "modelDefaultReasoningEfforts" | "reasoningEffortMap" | "modelReasoningEffortMap"
   | "noVisionModels" | "noReasoningModels" | "noTemperatureModels" | "noTopPModels" | "noPenaltyModels"
   | "autoToolChoiceOnlyModels" | "preserveReasoningContentModels" | "thinkingToggleModels" | "thinkingBudgetModels" | "escapeBuiltinToolNames"
@@ -98,8 +100,8 @@ export type ProviderConfigSeed = Pick<
 // same static model seed.
 // 260710 context refresh: Tier-2 evidence in
 // devlog/_plan/260710_provider_hardening/001_research_frontier.md.
-const ANTHROPIC_MODELS = ["claude-fable-5", "claude-sonnet-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"];
-const ANTHROPIC_MODEL_CONTEXT_WINDOWS: Record<string, number> = { "claude-sonnet-5": 1_000_000, "claude-fable-5": 1_000_000, "claude-opus-4-8": 1_000_000, "claude-haiku-4-5": 200_000 };
+const ANTHROPIC_MODELS = ["claude-fable-5", "claude-sonnet-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"];
+const ANTHROPIC_MODEL_CONTEXT_WINDOWS: Record<string, number> = { "claude-sonnet-5": 1_000_000, "claude-fable-5": 1_000_000, "claude-opus-5": 1_000_000, "claude-opus-4-8": 1_000_000, "claude-haiku-4-5": 200_000 };
 
 const ZAI_GLM_52_MODELS = ["glm-5.2", "glm-5.2[1m]"];
 const ZAI_GLM_52_REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
@@ -219,6 +221,13 @@ const ALIBABA_INTL_TOKEN_PLAN_MODELS = [
 const ALIBABA_INTL_TOKEN_PLAN_QWEN_MODELS = [
   "qwen3.8-max-preview", "qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash",
 ];
+
+// 260722 Tencent Cloud Coding Plan. The plan's model set is explicitly dynamic; these are the
+// current documented ids and live discovery remains enabled so successful /models responses win.
+// Tencent marks every Coding Plan model as text-only input and restricts plan keys to interactive
+// coding tools (not custom application backends or non-interactive batch automation).
+// Evidence: https://cloud.tencent.cn/document/product/1823/130092
+const TENCENT_CODING_PLAN_MODELS = ["tc-code-latest", "glm-5", "kimi-k2.5", "minimax-m2.5"];
 const ALIBABA_INTL_TOKEN_PLAN_INPUT_MODALITIES: Record<string, string[]> = {
   "qwen3.8-max-preview": ["text", "image"],
   "qwen3.7-max": ["text", "image"],
@@ -343,7 +352,7 @@ export const PROVIDER_REGISTRY: readonly ProviderRegistryEntry[] = [
     authKind: "oauth",
     featured: false,
     dashboardPreset: true,
-    note: "Experimental Cursor bridge. Live transport and live model discovery are enabled after a standalone PKCE browser login via 'ocx login cursor'; native read/write/delete/shell/fetch execution defaults to codex-sandbox mode (auto-enabled when the request declares Codex danger-full-access sandbox); override with \"nativeLocalExec\": \"on\" (always), \"off\" (never), or \"codex-sandbox\" (only for requests declaring the Codex danger-full-access sandbox; the declaration is caller-controlled prose the proxy cannot verify, and the auth-free loopback bind admits any process on this host, including other local users — enable only where every data-plane client is trusted) — legacy \"unsafeAllowNativeLocalExec\": true still means \"on\" — on providers.cursor in ~/.opencodex/config.json (dashboard: Providers → Cursor → Edit JSON) for a trusted local experiment.",
+    note: "Experimental Cursor bridge. Live transport and live model discovery are enabled after a standalone PKCE browser login via 'ocx login cursor'; native read/write/delete/shell/fetch execution is disabled by default and request text such as Codex sandbox markers never authorizes it. Set \"nativeLocalExec\": \"on\" on providers.cursor in ~/.opencodex/config.json (dashboard: Providers → Cursor → Edit JSON) only for a trusted local experiment where every data-plane caller is trusted. \"off\" denies all, \"codex-sandbox\" is accepted for backwards compatibility but fails closed, and legacy \"unsafeAllowNativeLocalExec\": true still means explicit operator opt-in.",
     models: cursorModelIds(CURSOR_STATIC_MODELS),
     liveModels: true,
     defaultModel: "auto",
@@ -743,6 +752,20 @@ export const PROVIDER_REGISTRY: readonly ProviderRegistryEntry[] = [
   },
   { id: "nanogpt", label: "NanoGPT", baseUrl: "https://nano-gpt.com/api/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://nano-gpt.com/api" },
   { id: "synthetic", label: "Synthetic", baseUrl: "https://api.synthetic.new/openai/v1", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://synthetic.new" },
+  // SiliconFlow publishes an OpenAI-compatible chat endpoint and a dynamic model catalog. Do not
+  // freeze reasoning controls here: enable_thinking/thinking_budget support and limits vary by
+  // model, so live metadata or an explicit user override must own those capabilities.
+  // Evidence: https://docs.siliconflow.cn/en/api-reference/chat-completions/chat-completions
+  {
+    id: "siliconflow",
+    label: "SiliconFlow",
+    baseUrl: "https://api.siliconflow.cn/v1",
+    adapter: "openai-chat",
+    authKind: "key",
+    dashboardUrl: "https://cloud.siliconflow.cn/account/ak",
+    liveModels: true,
+    note: "OpenAI-compatible live model catalog; reasoning controls vary by model.",
+  },
   // Qwen Cloud: token plan is the preset default; GUI offers pay-as-you-go + custom via baseUrlChoices.
   // Formerly `qwen-portal` / portal.qwen.ai — that host is outdated.
   {
@@ -755,6 +778,20 @@ export const PROVIDER_REGISTRY: readonly ProviderRegistryEntry[] = [
     baseUrlChoices: QWEN_CLOUD_BASE_URL_CHOICES,
     dashboardUrl: "https://docs.qwencloud.com",
     note: "Pick token plan, pay as you go, or a custom compatible-mode base URL",
+  },
+  {
+    id: "tencent-coding-plan",
+    label: "Tencent Cloud Coding Plan",
+    baseUrl: "https://api.lkeap.cloud.tencent.com/coding/v3",
+    adapter: "openai-chat",
+    authKind: "key",
+    dashboardUrl: "https://console.cloud.tencent.com/tokenhub/codingplan",
+    defaultModel: "tc-code-latest",
+    models: TENCENT_CODING_PLAN_MODELS,
+    liveModels: true,
+    modelInputModalities: Object.fromEntries(TENCENT_CODING_PLAN_MODELS.map(id => [id, ["text"]])),
+    noVisionModels: TENCENT_CODING_PLAN_MODELS,
+    note: "Coding tools only. Tencent forbids general API automation, custom backends, and non-interactive batch use.",
   },
   // 2026-07-10: docs unverified; model data frozen. Evidence: devlog/_plan/260710_provider_hardening/002_research_cn.md.
   { id: "qianfan", label: "Qianfan (Baidu)", baseUrl: "https://qianfan.baidubce.com/v2", adapter: "openai-chat", authKind: "key", dashboardUrl: "https://console.bce.baidu.com/iam/#/iam/apikey/list" },

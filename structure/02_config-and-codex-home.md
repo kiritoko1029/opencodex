@@ -37,13 +37,30 @@ requires_openai_auth = true
 Root TOML keys must be written before the first `[table]`. Re-injection strips stale opencodex
 blocks, stale root context-window overrides, and stale opencodex catalog paths before rewriting.
 
+If the root config selects a provider other than `openai` or `opencodex`, injection must leave the
+config byte-for-byte unchanged and skip profile creation/updates and history migration. External
+provider managers own that routing configuration, and replacing their provider id can hide
+otherwise intact Codex sessions. This ownership check must run before catalog/cache refresh,
+journal creation, and the background history migration guardian.
+
 `supports_websockets = true` is appended only when `websocketsEnabled(config)` returns true.
 
 ## Profile and fast tier
 
-opencodex also writes `$CODEX_HOME/opencodex.config.toml` as an explicit profile target. Codex config
-uses `service_tier = "fast"` and `[features].fast_mode = true`; catalog/request tier metadata may use
-`priority`. Do not collapse these spellings into one value.
+When opencodex owns routing, it also writes `$CODEX_HOME/opencodex.config.toml` as an explicit profile
+target. Codex config uses `service_tier = "fast"` and `[features].fast_mode = true`;
+catalog/request tier metadata may use `priority`. Do not collapse these spellings into one value.
+
+## Provider output defaults
+
+`OcxProviderConfig.defaultMaxOutputTokens` and `modelMaxOutputTokens` are OpenAI Chat wire defaults,
+not context-window metadata. They are applied only when a Responses request omits
+`max_output_tokens`; an explicit request value wins, then a model-specific configured value, then
+the provider default, then the adapter omits `max_tokens`.
+
+Both fields must stay positive finite integers at disk-config and management validation boundaries.
+Registry entries may seed them through `providerConfigSeed`, key-login derivation, OAuth reconcile,
+and `routeModel`, but user config overrides registry defaults per field/key.
 
 ## Restore
 

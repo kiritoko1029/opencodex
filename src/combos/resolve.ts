@@ -1,6 +1,6 @@
 import type { OcxComboTarget, OcxConfig } from "../types";
 import { coolComboTarget, isComboTargetInCooldown } from "./failover";
-import { getCombo, parseComboModelId, targetKey } from "./types";
+import { getCombo, resolveComboId, targetKey } from "./types";
 import type { NormalizedComboConfig } from "./types";
 
 export interface ComboPick {
@@ -143,13 +143,18 @@ export function noteComboFailure(comboId: string, target: OcxComboTarget): void 
 export function advanceComboAfterFailure(
   config: OcxConfig,
   pick: ComboPick,
-  options: { retryAfter?: string | null; now?: number } = {},
+  options: {
+    retryAfter?: string | null;
+    now?: number;
+    eligible?: (target: Required<OcxComboTarget>) => boolean;
+  } = {},
 ): ComboPick | null {
   noteComboFailure(pick.comboId, pick.target);
   coolComboTarget(pick.comboId, pick.target, options);
   return pickComboTarget(config, pick.comboId, {
     exclude: pick.attempted,
-    eligible: target => !isComboTargetInCooldown(pick.comboId, target, options.now),
+    eligible: target => !isComboTargetInCooldown(pick.comboId, target, options.now)
+      && (options.eligible?.(target) ?? true),
   });
 }
 
@@ -162,7 +167,7 @@ export function clearComboSelectionState(comboId?: string): void {
 }
 
 export function tryPickComboModel(config: OcxConfig, modelId: string): ComboPick | null {
-  const comboId = parseComboModelId(modelId);
+  const comboId = resolveComboId(config, modelId);
   if (!comboId) return null;
   if (!getCombo(config, comboId)) throw new UnknownComboError(comboId);
   const picked = pickComboTarget(config, comboId);

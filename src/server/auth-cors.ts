@@ -1,7 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { formatErrorResponse } from "../bridge";
 import {
+  booleanRecordConfigError,
   codexAutoStartEnabled,
+  positiveIntegerConfigError,
   positiveIntegerRecordConfigError,
   providerBaseUrlConfigError,
   providerHeadersConfigError,
@@ -78,7 +80,10 @@ export function corsHeaders(req?: Request, config?: OcxConfig): Record<string, s
   return {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-OpenCodex-API-Key, X-Api-Key, Anthropic-Version, Anthropic-Beta",
+    // ChatGPT-Account-Id is required for browser/Electron ChatGPT & Codex App voice preflights
+    // (direct forward auth matches the bearer to this account id). The OpenAI-Alpha .. X-OAI-Attestation
+    // block covers GPT-Live voice protocol headers relayed by the /v1/live call-create path.
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-OpenCodex-API-Key, X-Api-Key, Anthropic-Version, Anthropic-Beta, ChatGPT-Account-Id, OpenAI-Alpha, X-Session-Id, Session-Id, Thread-Id, Originator, X-OAI-Attestation",
     "Vary": "Origin",
   };
 }
@@ -227,6 +232,12 @@ export function providerManagementConfigError(name: unknown, provider: unknown):
   if (headersError) return `provider ${name} ${headersError}`;
   const maxInputError = positiveIntegerRecordConfigError(raw.modelMaxInputTokens, "modelMaxInputTokens");
   if (maxInputError) return `provider ${name} ${maxInputError}`;
+  const reasoningSummariesError = booleanRecordConfigError(raw.modelSupportsReasoningSummaries, "modelSupportsReasoningSummaries");
+  if (reasoningSummariesError) return `provider ${name} ${reasoningSummariesError}`;
+  const defaultMaxOutputError = positiveIntegerConfigError(raw.defaultMaxOutputTokens, "defaultMaxOutputTokens");
+  if (defaultMaxOutputError) return `provider ${name} ${defaultMaxOutputError}`;
+  const maxOutputError = positiveIntegerRecordConfigError(raw.modelMaxOutputTokens, "modelMaxOutputTokens");
+  if (maxOutputError) return `provider ${name} ${maxOutputError}`;
   const openRouterError = openRouterRoutingConfigError(typed);
   if (openRouterError) return `provider ${name} ${openRouterError}`;
   if (typed.authMode === "local") {
@@ -294,6 +305,8 @@ export function safeConfigDTO(config: OcxConfig): unknown {
       "models",
       "contextWindow",
       "modelContextWindows",
+      "defaultMaxOutputTokens",
+      "modelMaxOutputTokens",
       "openRouterRouting",
       "modelOpenRouterRouting",
       "reasoningEfforts",

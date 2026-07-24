@@ -7,6 +7,7 @@ import {
   COMBO_EFFORTS,
   buildComboAttention,
   comboModelId,
+  comboPublicModelId,
   draftEquals,
   emptyDraft,
   filterCombos,
@@ -44,7 +45,7 @@ export interface ComboWorkspaceProps {
   models: ModelOption[];
   loading?: boolean;
   onRefresh: () => void;
-  onSave: (item: ComboItem, isCreate: boolean) => Promise<{ ok: boolean; error?: string }>;
+  onSave: (item: ComboItem, isCreate: boolean, renameFrom?: string) => Promise<{ ok: boolean; error?: string }>;
   onRemove: (id: string) => Promise<{ ok: boolean; error?: string }>;
   onAdd: () => void;
   adding: boolean;
@@ -365,6 +366,7 @@ function UnsavedLeaveDialog({
 
 export function AddComboModal({
   existingIds,
+  existingAliases,
   providerMap,
   providers,
   models,
@@ -372,6 +374,7 @@ export function AddComboModal({
   onSubmit,
 }: {
   existingIds: string[];
+  existingAliases: string[];
   providerMap: Readonly<Record<string, { disabled?: boolean }>>;
   providers: ProviderOption[];
   models: ModelOption[];
@@ -397,6 +400,7 @@ export function AddComboModal({
   const submit = async () => {
     const code = validateComboDraft(draft, {
       existingIds,
+      existingAliases,
       isCreate: true,
       providers: providerMap,
     });
@@ -406,7 +410,9 @@ export function AddComboModal({
     }
     setBusy(true);
     setError("");
-    const res = await onSubmit({ ...draft, id: draft.id.trim(), model: comboModelId(draft.id.trim()) });
+    const id = draft.id.trim();
+    const alias = draft.alias?.trim() || null;
+    const res = await onSubmit({ ...draft, id, alias, model: comboPublicModelId(id, alias) });
     setBusy(false);
     if (!res.ok) {
       setError(res.error || t("cws.saveFailed"));
@@ -432,12 +438,38 @@ export function AddComboModal({
               id="cwi-new-id"
               className="input mono"
               value={draft.id}
-              placeholder={t("cws.field.idPlaceholder")}
               disabled={busy}
-              onChange={(e) => setDraft((d) => ({ ...d, id: e.target.value, model: comboModelId(e.target.value) }))}
+              onChange={(e) => setDraft((d) => ({
+                ...d,
+                id: e.target.value,
+                model: comboPublicModelId(e.target.value, d.alias),
+              }))}
             />
             <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
-              {t("cws.field.idHint", { model: draft.id.trim() ? comboModelId(draft.id.trim()) : "combo/…" })}
+              {t("cws.field.idInternalHint")}
+            </p>
+          </div>
+          <div className="cwi-field">
+            <label htmlFor="cwi-new-alias">{t("cws.field.alias")}</label>
+            <input
+              id="cwi-new-alias"
+              className="input mono"
+              value={draft.alias ?? ""}
+              placeholder={t("cws.field.aliasPlaceholder")}
+              disabled={busy}
+              onChange={(e) => setDraft((d) => ({
+                ...d,
+                alias: e.target.value.trim() ? e.target.value : null,
+                model: comboPublicModelId(d.id, e.target.value),
+              }))}
+            />
+            <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+              {t("cws.field.aliasHint")}
+            </p>
+            <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+              {t("cws.field.idHint", {
+                model: draft.id.trim() ? comboPublicModelId(draft.id, draft.alias) : "…",
+              })}
             </p>
           </div>
           <div className="cwi-field">
@@ -560,23 +592,11 @@ function OverviewPanel({
   );
 }
 
-function EmptyState({ onAdd }: { onAdd: () => void }) {
-  const t = useT();
-  return (
-    <div className="combos-workspace-empty-root">
-      <button type="button" className="cwi-empty-cta" onClick={onAdd}>
-        <span className="pwi-empty-right-icon" aria-hidden="true">
-          <IconShuffle style={{ width: 64, height: 64 }} />
-        </span>
-        <span className="cwi-empty-cta-title">{t("cws.emptyTitle")}</span>
-        <span className="pwi-empty-right-sub">{t("cws.empty.createDesc")}</span>
-      </button>
-    </div>
-  );
-}
-
 function DetailPanel({
   baseline,
+  isCreate = false,
+  otherIds,
+  otherAliases,
   providerMap,
   providers,
   models,
@@ -587,13 +607,18 @@ function DetailPanel({
   onDirtyChange,
 }: {
   baseline: ComboItem;
+  isCreate?: boolean;
+  /** Ids of all OTHER combos — rename collisions validate against these. */
+  otherIds: string[];
+  /** Aliases of all OTHER combos — alias uniqueness validates against these. */
+  otherAliases: string[];
   providerMap: Readonly<Record<string, { disabled?: boolean }>>;
   providers: ProviderOption[];
   models: ModelOption[];
-  onBack: () => void;
+  onBack?: () => void;
   onSaved: (item: ComboItem) => void;
-  onRequestRemove: () => void;
-  onSave: (item: ComboItem, isCreate: boolean) => Promise<{ ok: boolean; error?: string }>;
+  onRequestRemove?: () => void;
+  onSave: (item: ComboItem, isCreate: boolean, renameFrom?: string) => Promise<{ ok: boolean; error?: string }>;
   onDirtyChange: (dirty: boolean) => void;
 }) {
   const t = useT();
@@ -603,7 +628,7 @@ function DetailPanel({
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const dirty = !draftEquals(draft, baseline);
-  const baselineSyncKey = `${baseline.id}:${baseline.strategy}:${baseline.stickyLimit}:${baseline.defaultEffort}:${baseline.targets.map((t) => `${t.provider}/${t.model}:${t.weight ?? 1}`).join(",")}`;
+  const baselineSyncKey = `${baseline.id}:${baseline.alias ?? ""}:${baseline.strategy}:${baseline.stickyLimit}:${baseline.defaultEffort}:${baseline.targets.map((t) => `${t.provider}/${t.model}:${t.weight ?? 1}`).join(",")}`;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -632,8 +657,9 @@ function DetailPanel({
 
   const save = async () => {
     const code = validateComboDraft(draft, {
-      existingIds: [],
-      isCreate: false,
+      existingIds: otherIds,
+      existingAliases: otherAliases,
+      isCreate,
       providers: providerMap,
     });
     if (code) {
@@ -641,33 +667,55 @@ function DetailPanel({
       return;
     }
     setBusy(true);
-    const res = await onSave(draft, false);
+    const trimmedId = draft.id.trim();
+    const alias = draft.alias?.trim() || null;
+    const item = {
+      ...draft,
+      id: trimmedId,
+      alias,
+      model: comboPublicModelId(trimmedId, alias),
+    };
+    const renameFrom = !isCreate && trimmedId !== baseline.id ? baseline.id : undefined;
+    const res = await onSave(item, isCreate, renameFrom);
     setBusy(false);
     if (!res.ok) {
       setMsg({ ok: false, text: res.error || t("cws.saveFailed") });
       return;
     }
-    setMsg({ ok: true, text: t("cws.saved") });
-    onSaved(draft);
+    setMsg({
+      ok: true,
+      text: isCreate ? t("cws.created", { model: item.model }) : t("cws.saved"),
+    });
+    onSaved(item);
   };
+
+  const headerModel = isCreate
+    ? (draft.id.trim() ? comboPublicModelId(draft.id, draft.alias) : t("cws.addTitle"))
+    : baseline.model;
 
   return (
     <div className="combos-workspace-detail">
       <div className="combos-workspace-detail-head">
-        <button type="button" className="btn btn-ghost btn-sm pwi-back-overview" onClick={onBack} aria-label={t("cws.backToAll")}>
-          <IconChevron style={{ width: 14, height: 14, transform: "rotate(180deg)" }} aria-hidden="true" />
-          {t("cws.allCombos")}
-        </button>
-        <h2 className="combos-workspace-detail-title">{baseline.model}</h2>
-        <button type="button" className="chip cwi-copy-chip" onClick={() => { void copyModel(); }} title={t("cws.copyModel")}>
-          {copied ? t("cws.copied") : t("cws.copyModel")}
-        </button>
-        <div className="combos-workspace-detail-actions">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onRequestRemove}>
-            <IconTrash width={14} height={14} /> {t("common.remove")}
+        {onBack && (
+          <button type="button" className="btn btn-ghost btn-sm pwi-back-overview" onClick={onBack} aria-label={t("cws.backToAll")}>
+            <IconChevron style={{ width: 14, height: 14, transform: "rotate(180deg)" }} aria-hidden="true" />
+            {t("cws.allCombos")}
           </button>
-          <button type="button" className="btn btn-primary btn-sm" disabled={!dirty || busy} onClick={() => { void save(); }}>
-            {busy ? t("common.saving") : t("common.save")}
+        )}
+        <h2 className="combos-workspace-detail-title">{headerModel}</h2>
+        {!isCreate && (
+          <button type="button" className="chip cwi-copy-chip" onClick={() => { void copyModel(); }} title={t("cws.copyModel")}>
+            {copied ? t("cws.copied") : t("cws.copyModel")}
+          </button>
+        )}
+        <div className="combos-workspace-detail-actions">
+          {!isCreate && onRequestRemove && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onRequestRemove}>
+              <IconTrash width={14} height={14} /> {t("common.remove")}
+            </button>
+          )}
+          <button type="button" className="btn btn-primary btn-sm" disabled={(!isCreate && !dirty) || busy} onClick={() => { void save(); }}>
+            {busy ? t("common.saving") : t(isCreate ? "cws.create" : "common.save")}
           </button>
         </div>
       </div>
@@ -686,6 +734,43 @@ function DetailPanel({
       <div className="combos-workspace-tab-content" role="tabpanel">
         {tab === "config" ? (
           <div className="cwi-form-grid">
+            <div className="cwi-field">
+              <label htmlFor="cwi-edit-id">{t("cws.field.id")}</label>
+              <input
+                id="cwi-edit-id"
+                className="input mono"
+                value={draft.id}
+                disabled={busy}
+                onChange={(e) => setDraft((d) => ({
+                  ...d,
+                  id: e.target.value,
+                  model: comboPublicModelId(e.target.value, d.alias),
+                }))}
+              />
+              <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+                {isCreate
+                  ? t("cws.field.idInternalHint")
+                  : t("cws.field.idHintEdit", { model: comboPublicModelId(draft.id, draft.alias) })}
+              </p>
+            </div>
+            <div className="cwi-field">
+              <label htmlFor="cwi-edit-alias">{t("cws.field.alias")}</label>
+              <input
+                id="cwi-edit-alias"
+                className="input mono"
+                value={draft.alias ?? ""}
+                placeholder={comboModelId(draft.id.trim() || "…")}
+                disabled={busy}
+                onChange={(e) => setDraft((d) => ({
+                  ...d,
+                  alias: e.target.value.trim() ? e.target.value : null,
+                  model: comboPublicModelId(d.id, e.target.value),
+                }))}
+              />
+              <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+                {t("cws.field.aliasHint")}
+              </p>
+            </div>
             <div className="cwi-field">
               <label>{t("cws.strategy")}</label>
               <StrategySeg
@@ -772,14 +857,31 @@ export default function ComboWorkspace({
   const [pendingSelect, setPendingSelect] = useState<string | null | undefined>(undefined);
   const [removeId, setRemoveId] = useState<string | null>(null);
   const [localBaseline, setLocalBaseline] = useState<ComboItem | null>(null);
+  const firstComboDraft = useMemo(() => emptyDraft(), []);
 
   const filtered = useMemo(() => filterCombos(combos, query), [combos, query]);
   const sections = useMemo(() => groupCombos(filtered), [filtered]);
+  const existingComboAliases = useMemo(
+    () => combos.flatMap((combo) => combo.alias ? [combo.alias] : []),
+    [combos],
+  );
   const activeId = selectedId && combos.some((c) => c.id === selectedId) ? selectedId : null;
   const selected = combos.find((c) => c.id === activeId) ?? null;
   const baseline = selected && localBaseline?.id === selected.id ? localBaseline : selected;
 
   const [detailDirty, setDetailDirty] = useState(false);
+
+  // Identity constraints for the detail editor: every OTHER combo's id (rename
+  // collisions) and alias (public-name uniqueness), collected in one pass.
+  const otherComboIds: string[] = [];
+  const otherComboAliases: string[] = [];
+  if (baseline) {
+    for (const combo of combos) {
+      if (combo.id === baseline.id) continue;
+      otherComboIds.push(combo.id);
+      if (combo.alias) otherComboAliases.push(combo.alias);
+    }
+  }
 
   const trySelect = useCallback((id: string | null) => {
     if (id === activeId) return;
@@ -802,32 +904,14 @@ export default function ComboWorkspace({
   const cancelPending = () => setPendingSelect(undefined);
 
   const showUnsaved = pendingSelect !== undefined && detailDirty;
-
-  if (!loading && combos.length === 0) {
-    return (
-      <>
-        <EmptyState onAdd={onAdd} />
-        {adding && (
-          <AddComboModal
-            existingIds={combos.map((c) => c.id)}
-            providerMap={providerMap}
-            providers={providers}
-            models={models}
-            onClose={onCloseAdd}
-            onSubmit={async (item) => {
-              const res = await onSave(item, true);
-              if (res.ok) {
-                onCloseAdd();
-                onCreated(item.id);
-                setSelectedId(item.id);
-              }
-              return res;
-            }}
-          />
-        )}
-      </>
-    );
-  }
+  const creatingFirstCombo = !loading && combos.length === 0;
+  const handleAdd = () => {
+    if (creatingFirstCombo) {
+      document.getElementById("cwi-edit-id")?.focus();
+      return;
+    }
+    onAdd();
+  };
 
   return (
     <div className="combos-workspace-root">
@@ -837,7 +921,7 @@ export default function ComboWorkspace({
             <div className="combos-workspace-rail-title">{t("nav.combos")}</div>
             <div className="combos-workspace-rail-count">{combos.length}</div>
           </div>
-          <button type="button" className="btn btn-primary btn-sm" onClick={onAdd} aria-label={t("cws.add")}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={handleAdd} aria-label={t("cws.add")}>
             <IconPlus width={14} height={14} /> {t("cws.add")}
           </button>
         </div>
@@ -854,7 +938,7 @@ export default function ComboWorkspace({
           </div>
         </div>
         <div className="combos-workspace-rail-list">
-          {filtered.length === 0 ? (
+          {filtered.length === 0 && combos.length > 0 ? (
             <p className="muted" style={{ padding: "16px" }}>{t("cws.noSearchResults")}</p>
           ) : (
             <>
@@ -902,16 +986,44 @@ export default function ComboWorkspace({
           <DetailPanel
             key={baseline.id}
             baseline={baseline}
+            otherIds={otherComboIds}
+            otherAliases={otherComboAliases}
             providerMap={providerMap}
             providers={providers}
             models={models}
             onBack={() => trySelect(null)}
             onSaved={(item) => {
-              setLocalBaseline(item);
               setDetailDirty(false);
+              // A rename retires the old id: follow the combo to its new key so the
+              // detail panel (keyed by id) remounts against the refreshed baseline.
+              if (item.id !== baseline.id) {
+                setSelectedId(item.id);
+                setLocalBaseline(null);
+              } else {
+                setLocalBaseline(item);
+              }
               onRefresh();
             }}
             onRequestRemove={() => setRemoveId(baseline.id)}
+            onSave={onSave}
+            onDirtyChange={setDetailDirty}
+          />
+        ) : creatingFirstCombo ? (
+          <DetailPanel
+            key="first-combo"
+            baseline={firstComboDraft}
+            isCreate
+            otherIds={[]}
+            otherAliases={[]}
+            providerMap={providerMap}
+            providers={providers}
+            models={models}
+            onSaved={(item) => {
+              setDetailDirty(false);
+              setSelectedId(item.id);
+              setLocalBaseline(item);
+              onCreated(item.id);
+            }}
             onSave={onSave}
             onDirtyChange={setDetailDirty}
           />
@@ -920,9 +1032,10 @@ export default function ComboWorkspace({
         )}
       </div>
 
-      {adding && (
+      {adding && !creatingFirstCombo && (
         <AddComboModal
           existingIds={combos.map((c) => c.id)}
+          existingAliases={existingComboAliases}
           providerMap={providerMap}
           providers={providers}
           models={models}
@@ -942,7 +1055,7 @@ export default function ComboWorkspace({
 
       {removeId && (
         <RemoveComboDialog
-          model={comboModelId(removeId)}
+          model={combos.find((c) => c.id === removeId)?.model ?? comboModelId(removeId)}
           onCancel={() => setRemoveId(null)}
           onConfirm={() => {
             void (async () => {

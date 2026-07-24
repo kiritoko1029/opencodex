@@ -22,6 +22,7 @@ import { normalizeAnthropicImages } from "./anthropic-image-normalize";
 import { neutralizeIdentity } from "./identity";
 import { CLAUDE_CODE_HEADERS, claudeCodeSessionId } from "./client-fingerprint";
 import { buildNonOpenAIToolCatalogNudgeForTools } from "./tool-catalog-nudge";
+import { decodeServerSentEvents } from "../lib/sse-decoder";
 
 /** Map a user content part to an Anthropic content block (text or image source). */
 function toAnthropicContentPart(p: OcxContentPart): unknown {
@@ -38,6 +39,9 @@ function toAnthropicContentPart(p: OcxContentPart): unknown {
 const DEFAULT_MAX_TOKENS = 8192;
 /** Safe ceiling for `max_tokens` (thinking + visible output) across current Claude 4.x models. */
 const REASONING_MAX_TOKENS_CEILING = 32_000;
+/** Adaptive-thinking ceiling: max effort budget (32k) + OUTPUT_HEADROOM (8k).
+ *  Must exceed REASONING_MAX_TOKENS_CEILING so effort=max actually preserves visible-output room. */
+const ADAPTIVE_THINKING_CEILING = 40_192;
 /** Anthropic's documented minimum `thinking.budget_tokens`. */
 const MIN_THINKING_BUDGET = 1024;
 /** Visible-output room added above the thinking budget when sizing `max_tokens`. */
@@ -635,11 +639,14 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
           // default 8192-token request can spend everything on thought and return empty text.
           body.thinking = { type: "adaptive" };
           body.output_config = { effort: adaptiveEffort(parsed.options.reasoning) };
-          const maxOut = parsed.options.maxOutputTokens ?? DEFAULT_MAX_TOKENS;
-          body.max_tokens = Math.min(
-            REASONING_MAX_TOKENS_CEILING,
-            Math.max(maxOut, reasoningBudget(adaptiveEffort(parsed.options.reasoning)) + OUTPUT_HEADROOM),
-          );
+          const explicitMaxOut = parsed.options.maxOutputTokens;
+          const wantBudget = reasoningBudget(parsed.options.reasoning);
+          const floor = wantBudget + OUTPUT_HEADROOM;
+          // Preserve explicit caller limits as-is; for omitted limits use the adaptive ceiling
+          // so effort=max (budget=32k) still leaves OUTPUT_HEADROOM tokens for visible output.
+          body.max_tokens = explicitMaxOut !== undefined
+            ? explicitMaxOut
+            : Math.min(ADAPTIVE_THINKING_CEILING, Math.max(DEFAULT_MAX_TOKENS, floor));
         } else {
           // Anthropic requires max_tokens > thinking.budget_tokens (max_tokens caps thinking +
           // visible output) and budget_tokens >= 1024. Codex sends the SAME value for both, which
@@ -715,9 +722,6 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
         return;
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
       let currentBlockType = "";
       let currentToolCallId = "";
       let currentToolCallName = "";
@@ -735,34 +739,23 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
         };
       };
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
+      for await (const record of decodeServerSentEvents(response.body, { includeComments: true })) {
+        if (record.kind === "comment") {
+          yield { type: "heartbeat" };
+          continue;
+        }
+        const payload = record.data.trim();
+        if (!payload) continue;
 
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
+        let data: Record<string, unknown>;
+        try {
+          data = JSON.parse(payload) as Record<string, unknown>;
+        } catch {
+          debugDroppedFrame("anthropic", payload);
+          continue;
+        }
 
-          let currentEventType = "";
-          for (const line of lines) {
-            if (line.startsWith("event: ")) {
-              currentEventType = line.slice(7).trim();
-              continue;
-            }
-            if (!line.startsWith("data: ")) continue;
-            const payload = line.slice(6).trim();
-            if (!payload) continue;
-
-            let data: Record<string, unknown>;
-            try {
-              data = JSON.parse(payload) as Record<string, unknown>;
-            } catch {
-              debugDroppedFrame("anthropic", payload);
-              continue;
-            }
-
-            switch (currentEventType || data.type) {
+        switch (record.event || data.type) {
               case "message_start": {
                 const message = data.message as { usage?: Record<string, number> } | undefined;
                 pendingUsage = mergeAnthropicUsage(pendingUsage, message?.usage);
@@ -790,7 +783,12 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
                   yield { type: "text_delta", text: delta.text };
                 } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
                   yield { type: "thinking_delta", thinking: delta.thinking };
-                } else if (delta.type === "signature_delta" && typeof delta.signature === "string" && currentBlockType === "thinking") {
+                } else if (delta.type === "reasoning_delta" && typeof delta.reasoning === "string") {
+                  // Some Anthropic-compatible reasoning models use `reasoning` names for the
+                  // otherwise equivalent thinking block. Preserve it as raw reasoning and keep
+                  // later text blocks independent.
+                  yield { type: "thinking_delta", thinking: delta.reasoning };
+                } else if (delta.type === "signature_delta" && typeof delta.signature === "string" && (currentBlockType === "thinking" || currentBlockType === "reasoning")) {
                   // Arrives once, just before the thinking block's content_block_stop; block-scoped
                   // so a stray signature on a non-thinking block can never be captured.
                   yield { type: "thinking_signature", signature: delta.signature };
@@ -823,20 +821,31 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
                 yield { type: "error", message: err?.message ?? "Anthropic error" };
                 return;
               }
-            }
-            currentEventType = "";
-          }
         }
-        if (pendingUsage && !emittedDone) yield* emitDone();
-      } finally {
-        reader.releaseLock();
+      }
+      if (!emittedDone) {
+        if (pendingStopReason !== undefined) {
+          const stopReason = pendingStopReason === "max_tokens"
+            ? "max_tokens"
+            : pendingStopReason === "refusal" || pendingStopReason === "content_filter"
+              ? "content_filter"
+              : undefined;
+          emittedDone = true;
+          yield {
+            type: "done",
+            usage: usageFromAnthropic(pendingUsage),
+            ...(stopReason ? { stopReason } : {}),
+          };
+        } else {
+          yield { type: "error", message: "upstream stream ended before message_stop — possible truncation" };
+        }
       }
     },
 
     async parseResponse(response: Response): Promise<AdapterEvent[]> {
       const json = await response.json() as Record<string, unknown>;
       const events: AdapterEvent[] = [];
-      const content = json.content as { type: string; text?: string; id?: string; name?: string; input?: unknown; thinking?: string; signature?: string; data?: string }[] | undefined;
+      const content = json.content as { type: string; text?: string; id?: string; name?: string; input?: unknown; thinking?: string; reasoning?: string; signature?: string; data?: string }[] | undefined;
       if (content) {
         for (const block of content) {
           if (block.type === "text" && block.text) {
@@ -846,6 +855,8 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
             if (typeof block.signature === "string" && block.signature) {
               events.push({ type: "thinking_signature", signature: block.signature });
             }
+          } else if (block.type === "reasoning" && typeof block.reasoning === "string") {
+            events.push({ type: "thinking_delta", thinking: block.reasoning });
           } else if (block.type === "redacted_thinking" && typeof block.data === "string") {
             events.push({ type: "redacted_thinking", data: block.data });
           } else if (block.type === "tool_use") {
@@ -856,10 +867,11 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
         }
       }
       const usage = json.usage as Record<string, number> | undefined;
+      const stopReason = typeof json.stop_reason === "string" ? json.stop_reason : undefined;
       events.push({
         type: "done",
         usage: usageFromAnthropic(usage),
-        ...(typeof json.stop_reason === "string" ? { stopReason: json.stop_reason } : {}),
+        ...(stopReason ? { stopReason } : {}),
       });
       return events;
     },

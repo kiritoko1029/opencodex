@@ -32,12 +32,13 @@ differing backup and rewrites known legacy namespaced selected ids to bare ids.
 | `providers` | `Record<string, OcxProviderConfig>` | — | Map of provider name → config. |
 | `openaiProviderTierVersion?` | `2` | set by migration | Marks the single option-aware OpenAI projection as complete. |
 | `defaultProvider` | `string` | `"openai"` | Provider used when routing finds no better match. |
-| `subagentModels?` | `string[]` | `gpt-5.5`, GPT-5.6 trio, `gpt-5.4-mini` | Up to 5 native slugs or `provider/model` ids featured first in Codex's subagent picker. Also injected into v2 delegation guidance as the available-model roster, annotated with the effort ladder each entry advertises in the catalog. An explicit empty list is preserved. |
+| `subagentModels?` | `string[]` | `gpt-5.5`, GPT-5.6 trio, `gpt-5.4-mini` | Up to 5 native slugs or `provider/model` ids featured first in Codex's subagent picker. The v2 guidance roster is the configured intersection of Codex's picker-visible, v2-compatible, priority-sorted first five, using canonical catalog slugs and available effort ladders; excluded entries remain configured. An explicit empty list is preserved. |
 | `injectionModel?` | `string` | — | Preferred native or routed model named in the injected multi-agent guidance (v2 surface); delegation is told to pass this exact model to `spawn_agent` with `fork_turns: "none"`. |
 | `injectionEffort?` | `string` | — | Preferred `spawn_agent` reasoning effort (`low` through `ultra`). Only meaningful with `injectionModel`. |
 | `effortCap?` | `string` | — | Hard per-request ceiling for reasoning effort. A multi-agent V2 feature: it applies to main turns whose own tool list carries the V2 collab surface, plus spawned-child turns marked with exactly `x-openai-subagent: collab_spawn` or `"subagent_kind": "thread_spawn"` in `x-codex-turn-metadata` (marked children qualify regardless of their own tool surface). Plain and V1-surface main turns are untouched, compaction turns always bypass caps, and `multiAgentMode: "v1"` disables caps entirely (the Dashboard hides the panel). Accepts `low` through `ultra`; caps only lower, never raise. Snaps down to the highest supported rung at or below the cap. If the model exposes no effort control, or no supported rung fits under the cap, the effort field is removed and the provider default applies. `max` and `ultra` are accepted but do not impose a lower rank ceiling (requests arrive as `low` through `max` after the client's `ultra` → `max` conversion), though known model ladders may still cause snap-down or strip. The Dashboard picker offers `low` through `xhigh`. Managed via `GET /api/effort-caps` and `PUT /api/effort-caps`. |
 | `subagentEffortCap?` | `string` | — | The same hard ceiling, applied only to spawned-child turns identified by codex-rs markers matched exactly: `x-openai-subagent: collab_spawn` or `"subagent_kind": "thread_spawn"` in `x-codex-turn-metadata`. Other internal sub-agent categories (review, compaction, memory consolidation) never trip this cap, and `multiAgentMode: "v1"` disables it entirely. Accepts `low` through `ultra`; when both caps are set, the lower one wins, and caps only lower, never raise. Snaps down to the highest supported rung at or below the cap. If the model exposes no effort control, or no supported rung fits under the cap, the effort field is removed and the provider default applies. `max` and `ultra` are accepted but do not impose a lower rank ceiling (requests arrive as `low` through `max` after the client's `ultra` → `max` conversion), though known model ladders may still cause snap-down or strip. The Dashboard picker offers `low` through `xhigh`. Managed via `GET /api/effort-caps` and `PUT /api/effort-caps`. |
 | `injectionPrompt?` | `string` | — | Custom override for the injected v2 guidance body. Replaces the built-in text; `{{model}}`, `{{effort}}`, and `{{roster}}` placeholders are substituted. Firing gates are unchanged. Settable via `PUT /api/injection-model` (`prompt` key). |
+| `multiAgentGuidanceEnabled?` | `boolean` | `true` | Controls only OpenCodex-authored multi-agent developer guidance. Unset/`true` preserves v1/v2 guidance; `false` suppresses both without changing the collaboration surface, `subagentModels`, routing, or effort caps. `GET/PUT /api/injection-model` exposes the effective value; PUT is a partial update. |
 | `disabledModels?` | `string[]` | — | Models hidden from Codex. Routed `provider/model` ids are excluded from the catalog and `/v1/models`; bare native GPT slugs (e.g. `gpt-5.4`) flip their catalog entry to `visibility: "hide"` and drop from the bare `/v1/models` list. Toggleable per model from the dashboard Models page. |
 | `multiAgentMode?` | `"v1" \| "default" \| "v2"` | `"default"` | 3-state multi-agent surface override. `"v1"` forces all models to the v1 surface (overrides upstream pins); `"default"` respects upstream model pins (sol/terra=v2, luna=v1); `"v2"` forces all models to v2. Settable from the dashboard Models page or `ocx v2 mode`. |
 | `providerContextCaps?` | `Record<string,number>` | `{}` | Per-provider Codex-visible context caps. A cap only lowers known context windows. |
@@ -48,6 +49,7 @@ differing backup and rewrites known legacy namespaced selected ids to bare ids.
 | `websockets?` | `boolean` | `false` | Advertise `supports_websockets` so Codex uses the Responses WebSocket path. Omit or set `false` to keep HTTP/SSE. |
 | `apiKeys?` | `OcxApiKey[]` | `[]` | Additional generated `ocx_…` credentials accepted by management and data-plane auth on non-loopback binds. Managed by the dashboard; entry fields are listed below. |
 | `codexAutoStart?` | `boolean` | `true` | Let the Codex shim run `ocx ensure` before launching Codex. `false` makes `ocx ensure` a no-op. |
+| `codexShimAutoRestore?` | `boolean` | `true` | Restore a previously installed Codex shim when a completed external Codex update replaces it. Set `false`, or set `OPENCODEX_CODEX_SHIM_AUTO_RESTORE=0` for a process-level opt-out. |
 | `syncResumeHistory?` | `boolean` | `true` | Reversible Codex App history compatibility mode. opencodex backs up original Codex thread metadata, remaps old OpenAI interactive rows to `opencodex`, and temporarily promotes opencodex-created `exec` rows to an app-visible source. `ocx stop` / `ocx restore` restore backed-up OpenAI rows and eject remaining opencodex user threads to OpenAI so native Codex can resume them after the proxy is removed from `config.toml`. Set `false` to opt out. |
 | `codexAccounts?` | `CodexAccount[]` | `[]` | ChatGPT/Codex pool account metadata managed by the Codex Auth dashboard. Secrets live separately in `codex-accounts.json`. |
 | `activeCodexAccountId?` | `string` | — | Pool account used for the next new Codex thread. Existing thread affinities keep their original account. |
@@ -145,6 +147,7 @@ network. Only do this on trusted networks, and always set a strong `OPENCODEX_AP
 | --- | --- | --- |
 | `adapter` | `string` | One of `openai-chat`, `openai-responses`, `anthropic`, `google`, `kiro`, `cursor`, `azure-openai` (or alias `azure`). |
 | `baseUrl` | `string` | Upstream API base URL. |
+| `responsesPath?` | `string` | Optional relative resource path for key-auth `openai-responses` requests. It must start with `/` and contain no URL scheme, query, or fragment. When omitted, the adapter keeps its legacy `/v1/responses` URL construction. |
 | `disabled?` | `boolean` | Keep the provider on disk but exclude it from routing and model/catalog listings. |
 | `apiKey?` | `string` | API key, or an `${ENV_VAR}` / `$ENV_VAR` reference resolved at request time. |
 | `apiKeyPool?` | `ApiKeyPoolEntry[]` | Multi-key pool. `apiKey` mirrors the active entry; each item has `id`, `key`, optional `label`, and optional numeric `addedAt`. |
@@ -155,6 +158,9 @@ network. Only do this on trusted networks, and always set a strong `OPENCODEX_AP
 | `contextWindow?` | `number` | Provider-wide Codex-visible context-window cap for routed catalog entries. Live metadata below this value is kept. |
 | `modelContextWindows?` | `Record<string,number>` | Model-specific context-window caps. These override `contextWindow` for matching model ids and never raise smaller live metadata. |
 | `modelInputModalities?` | `Record<string,string[]>` | Model-specific catalog input hints such as `["text"]` or `["text", "image"]`. |
+| `modelMaxInputTokens?` | `Record<string,number>` | Model-specific max input token limits used for catalog auto-compaction hints. Values must be positive integers. |
+| `defaultMaxOutputTokens?` | `number` | Provider-wide `openai-chat` fallback for `max_tokens` when the client omits `max_output_tokens`. Explicit requests still win. |
+| `modelMaxOutputTokens?` | `Record<string,number>` | Model-specific `openai-chat` fallback output budgets. Exact/model-pattern matches beat `defaultMaxOutputTokens`; all values must be positive integers. |
 | `headers?` | `Record<string,string>` | Extra upstream headers. Authorization, cookies, API-key headers, embedded newlines, and invalid header names are rejected. |
 | `forwardUserAgent?` | `boolean` | When `true`, custom-channel adapters (`openai-chat` / `openai-responses` / `anthropic` / `google` / `azure-openai`) copy the caller's `User-Agent` to the upstream request. Default off (runtime/protocol UA). A static `headers` `User-Agent` still wins. |
 | `openRouterRouting?` | `OpenRouterProviderRouting` | Default OpenRouter provider preferences. Supports `order`, `only`, and `allowFallbacks`; valid only with the canonical OpenRouter base URL and `openai-chat` adapter. |
@@ -164,6 +170,7 @@ network. Only do this on trusted networks, and always set a strong `OPENCODEX_AP
 | `refreshPolicy?` | `"proactive" \| "lazy-only" \| "disabled"` | Override this OAuth provider's Token Guardian policy. |
 | `reasoningEfforts?` | `string[]` | Provider-wide Codex reasoning labels to advertise and send (`low`, `medium`, `high`, `xhigh`, `max`, `ultra`). |
 | `modelReasoningEfforts?` | `Record<string,string[]>` | Model-specific reasoning labels. An empty list hides the effort control for that model. |
+| `modelSupportsReasoningSummaries?` | `Record<string,boolean>` | Model-specific reasoning-summary capability. Set a model to `false` to stop advertising summaries and strip summary-delivery fields before an `openai-responses` request. |
 | `reasoningEffortMap?` | `Record<string,string>` | Provider-wide wire aliases for reasoning labels. Use only when the upstream expects a different value. |
 | `modelReasoningEffortMap?` | `Record<string,Record<string,string>>` | Model-specific wire aliases for reasoning labels. |
 | `noReasoningModels?` | `string[]` | Models that reject a reasoning/thinking param — the adapter drops `reasoning_effort` for them. |
@@ -171,6 +178,7 @@ network. Only do this on trusted networks, and always set a strong `OPENCODEX_AP
 | `noTopPModels?` | `string[]` | Models that reject caller-specified `top_p`. |
 | `noPenaltyModels?` | `string[]` | Models that reject presence/frequency penalties. |
 | `parallelToolCalls?` | `boolean` | Enable/disable parallel tool calls. OpenAI Chat defaults on; non-chat adapters advertise support only on explicit `true`. |
+| `responsesItemIdRepair?` | `{ message?: string[]; reasoning?: string[]; repairMissingTerminalIds?: boolean }` | Provider-local, disabled-by-default passthrough SSE repair for exact `message` / `reasoning` placeholder ids and missing terminal ids. Downstream only; function-call ids and `call_id` are never rewritten. |
 | `autoToolChoiceOnlyModels?` | `string[]` | Models whose `tool_choice` accepts only `auto` or `none`; forced/named choices are downgraded. |
 | `preserveReasoningContentModels?` | `string[]` | Models that require prior assistant `reasoning_content` to remain in chat history. |
 | `thinkingToggleModels?` | `string[]` | Chat models using a vendor `thinking.enabled` toggle instead of an effort ladder. |
@@ -182,17 +190,63 @@ network. Only do this on trusted networks, and always set a strong `OPENCODEX_AP
 | `location?` | `string` | Vertex location; environment fallback is `GOOGLE_CLOUD_LOCATION`. |
 | `mcpServers?` | `Record<string,CursorMcpServerConfig>` | **Cursor only.** MCP servers started over stdio or reached over Streamable HTTP; fields are listed below. |
 | `desktopExecutor?` | `DesktopExecutorConfig` | **Cursor only.** External computer-use/record-screen commands; fields are listed below. |
-| `unsafeAllowNativeLocalExec?` | `boolean` | **Cursor adapter only.** Opt-in escape hatch for Cursor server-driven local `read` / `write` / `delete` / `ls` / `grep` / `shell` / `fetch` execution. Defaults to `false` so remote Cursor messages cannot bypass Codex approval and sandbox enforcement. See [Cursor provider](#cursor-provider-adapter-cursor) below. |
+| `unsafeAllowNativeLocalExec?` | `boolean` | **Cursor adapter only.** Legacy compatibility boolean for the Cursor server-driven local `read` / `write` / `delete` / `ls` / `grep` / `shell` / `fetch` executor. Equivalent to `nativeLocalExec: "on"` when `nativeLocalExec` is unset; an explicit `nativeLocalExec` value always wins. Defaults to `false`. Prefer `nativeLocalExec` for new configs. See [Cursor provider](#cursor-provider-adapter-cursor) below. |
+| `nativeLocalExec?` | `"off" \| "codex-sandbox" \| "on"` | **Cursor adapter only.** Native local exec policy for the Cursor server-driven executor. `"off"` (default) rejects it; `"on"` is the trusted-local opt-in; `"codex-sandbox"` is accepted for backwards compatibility but is fail-closed like `"off"`. See [Cursor provider](#cursor-provider-adapter-cursor) below. |
+
+For broken `openai-responses` compatibility gateways, `responsesItemIdRepair` belongs on the
+provider object itself, for example:
+
+```json
+{
+  "providers": {
+    "custom-gateway": {
+      "adapter": "openai-responses",
+      "baseUrl": "https://gateway.example/v1",
+      "apiKey": "${GATEWAY_KEY}",
+      "responsesItemIdRepair": {
+        "reasoning": ["rs_0"],
+        "message": ["msg_0"],
+        "repairMissingTerminalIds": true
+      }
+    }
+  }
+}
+```
+
+The placeholder lists are exact string matches only. Leave the field unset for normal/stateful
+Responses providers so passthrough stays byte-for-byte identical to upstream.
 
 ## Cursor provider (`adapter: "cursor"`)
 
 The Cursor bridge is experimental. After `ocx login cursor`, add or edit the `cursor` entry under
 `providers` in `~/.opencodex/config.json` (Windows: `%USERPROFILE%\.opencodex\config.json`).
 
+Cursor Router's complete optimization ladder is exposed as separate Codex model ids because Codex's
+model picker cannot render Cursor-specific model parameters:
+
+| Codex model | Cursor Router mode |
+| --- | --- |
+| `cursor/auto` | Team/account default (backwards compatible) |
+| `cursor/auto-cost` | Cost |
+| `cursor/auto-balance` | Balance |
+| `cursor/auto-intelligence` | Intelligence |
+
+The explicit variants all send Cursor's `default` model with its `optimization` model parameter, so
+the selection is preserved on every request. They remain available when live model discovery omits
+`default`, just like the original `cursor/auto` entry.
+
 By default, Cursor's server-driven native local tools stay **disabled**. Codex keeps using its own
-tools (`apply_patch`, `exec_command`, and so on) with approval and sandbox policy. Set
-`unsafeAllowNativeLocalExec` only for trusted local experiments where you accept that Cursor may
-read, write, delete, list, grep, shell, or fetch on your machine **without** Codex's approval path.
+tools (`apply_patch`, `exec_command`, and so on) with approval and sandbox policy. Use the
+`nativeLocalExec` field to choose a policy:
+
+- **`"off"` (default, safest)** — rejects all Cursor server-driven local `read`, `write`, `delete`,
+  `ls`, `grep`, `shell`, and `fetch` execution. Use this unless you have deliberately opted in.
+- **`"on"` (trusted-local opt-in)** — always allows Cursor-native local execution for this provider.
+  Use it only for a trusted local experiment on a host where every data-plane caller is trusted.
+- **`"codex-sandbox"` (accepted, fail-closed)** — recognized for backwards compatibility, but
+  currently behaves like `"off"`. Responses `instructions` / `system` / `developer` text is
+  caller-controlled prose, and opencodex has no trustworthy per-request attestation that it reflects
+  a real Codex sandbox state, so it never authorizes native local exec.
 
 ```json
 {
@@ -202,21 +256,25 @@ read, write, delete, list, grep, shell, or fetch on your machine **without** Cod
       "baseUrl": "https://api2.cursor.sh",
       "authMode": "oauth",
       "defaultModel": "auto",
-      "unsafeAllowNativeLocalExec": true
+      "nativeLocalExec": "off"
     }
   }
 }
 ```
 
-The flag belongs on the **provider object** (`providers.cursor`), not at the top level of
+The field belongs on the **provider object** (`providers.cursor`), not at the top level of
 `config.json`.
 
 You can also set it from the [web dashboard](/opencodex/guides/web-dashboard/): **Providers →
-Cursor → Edit JSON**, add `"unsafeAllowNativeLocalExec": true`, save, then restart the proxy
-(`ocx restart` or `ocx stop` + `ocx start`).
+Cursor → Edit JSON**, set `"nativeLocalExec"` to `"off"`, `"on"`, or `"codex-sandbox"`, save, then
+restart the proxy (`ocx restart` or `ocx stop` + `ocx start`).
+
+The legacy `unsafeAllowNativeLocalExec: true` boolean is still accepted and is equivalent to
+`nativeLocalExec: "on"` when `nativeLocalExec` is unset; an explicit `nativeLocalExec` value always
+wins. Prefer `nativeLocalExec` for new configs.
 
 MCP, screen recording, and computer-use use separate `mcpServers` / `desktopExecutor` config and are
-not controlled by this flag.
+not controlled by this field.
 
 ### Cursor integration records
 
@@ -230,8 +288,11 @@ accept `headers?: Record<string,string>`. Both forms support `enabled?: boolean`
 one JSON request from stdin, and must write one JSON result to stdout.
 
 :::caution[Security]
-Leave `unsafeAllowNativeLocalExec` unset or `false` unless you explicitly want Cursor-native local
-execution that bypasses Codex approval and sandbox semantics.
+`"off"` is the safest default. The default loopback bind admits **any** local process without auth
+(including other local users on multi-user machines), and request text such as Codex sandbox
+markers never authorizes native local exec. Leave `nativeLocalExec` unset or set it to `"off"`
+unless you explicitly want Cursor-native local execution that bypasses Codex approval and sandbox
+semantics.
 :::
 
 ## OpenRouter provider routing
@@ -382,7 +443,7 @@ with the intended account and workload.
       "noVisionModels": ["glm-5.2", "gpt-oss", "qwen3-coder", "deepseek-v4-pro"]
     }
   },
-  "subagentModels": ["anthropic/claude-opus-4-8", "ollama-cloud/glm-5.2"],
+  "subagentModels": ["anthropic/claude-opus-5", "ollama-cloud/glm-5.2"],
   "disabledModels": [],
   "websockets": false,
   "webSearchSidecar": {
